@@ -56,6 +56,7 @@ from ..storage.repos import (
 from ..tools.registry import ToolRegistry
 from .base import AgentDeps
 from .generation import GenerationAgent
+from .ranking import RankingAgent
 from .reflection import ReflectionAgent
 from .schemas import RECORD_RESEARCH_PLAN_TOOL
 
@@ -217,6 +218,7 @@ class Supervisor:
         agents = {
             "generation": GenerationAgent(deps),
             "reflection": ReflectionAgent(deps),
+            "ranking": RankingAgent(deps),
         }
         sem = asyncio.Semaphore(self.cfg.run.concurrency)
         inflight: set[asyncio.Task] = set()
@@ -239,7 +241,7 @@ class Supervisor:
                     log.exception("task_failed", err=str(e))
                     return
 
-                # Follow-up scheduling (M3 minimal rules)
+                # Follow-up scheduling
                 if result.kind == "hypothesis_created":
                     for hid in result.hypothesis_ids:
                         await task_repo.enqueue(conn, Task(
@@ -249,6 +251,25 @@ class Supervisor:
                             target_id=hid, payload={"kind": "full"},
                             priority=100, status="pending",
                             idempotency_key=f"{hid}::review::full",
+                        ))
+                elif result.kind == "review_completed":
+                    for hid in result.hypothesis_ids:
+                        await task_repo.enqueue(conn, Task(
+                            id=ids.task_id(), session_id=session.id,
+                            created_at=datetime.now(UTC),
+                            agent="ranking", action="AddToTournament",
+                            target_id=hid, payload={}, priority=80, status="pending",
+                            idempotency_key=f"{hid}::ranking::add",
+                        ))
+                elif result.kind == "added_to_tournament":
+                    for hid in result.hypothesis_ids:
+                        await task_repo.enqueue(conn, Task(
+                            id=ids.task_id(), session_id=session.id,
+                            created_at=datetime.now(UTC),
+                            agent="ranking", action="RunTournamentBatch",
+                            target_id=None,
+                            payload={"focus": hid}, priority=120, status="pending",
+                            idempotency_key=f"{hid}::ranking::focus_batch",
                         ))
 
                 await task_repo.complete(conn, t.id)
