@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -212,11 +213,98 @@ def run(
 
 
 @app.command()
-def resume(ctx: typer.Context, session_id: str = typer.Argument(...)) -> None:
-    """[M5+] Resume a paused or crashed session."""
-    _ = ctx, session_id
-    console.print("[yellow]`resume` lands in M5.[/yellow]")
-    raise typer.Exit(2)
+def resume(
+    ctx: typer.Context,
+    session_id: str = typer.Argument(...),
+) -> None:
+    """Resume a paused or interrupted session."""
+    cfg, _ = ctx.obj
+    if not has_anthropic_key(cfg):
+        console.print("[red]ANTHROPIC_API_KEY is not set. See .env.example.[/red]")
+        raise typer.Exit(1)
+    from .agents.supervisor import Supervisor
+
+    sup = Supervisor(cfg)
+    sid = asyncio.run(sup.run_session("", resume_session_id=session_id))
+    console.print(f"[green]Done.[/green] session={sid}")
+
+
+@app.command()
+def pause(ctx: typer.Context, session_id: str = typer.Argument(...)) -> None:
+    """Pause a running session. Workers drain; the loop sleeps until resume."""
+    cfg, _ = ctx.obj
+
+    async def _do() -> None:
+        conn = await db_mod.connect(cfg)
+        try:
+            from .storage.repos import sessions as sess_repo
+
+            await sess_repo.set_status(conn, session_id, "paused")
+        finally:
+            await conn.close()
+
+    asyncio.run(_do())
+    console.print(f"[yellow]Paused[/yellow] session={session_id}")
+
+
+@app.command()
+def abort(ctx: typer.Context, session_id: str = typer.Argument(...)) -> None:
+    """Abort a running session. The main loop exits at the next check."""
+    cfg, _ = ctx.obj
+
+    async def _do() -> None:
+        conn = await db_mod.connect(cfg)
+        try:
+            from .storage.repos import sessions as sess_repo
+
+            await sess_repo.set_status(conn, session_id, "aborted")
+        finally:
+            await conn.close()
+
+    asyncio.run(_do())
+    console.print(f"[red]Aborted[/red] session={session_id}")
+
+
+@app.command()
+def feedback(
+    ctx: typer.Context,
+    session_id: str = typer.Argument(...),
+    text: str = typer.Argument(..., help="Free-text feedback to inject."),
+    kind: str = typer.Option(
+        "directive", "--kind",
+        help="directive | preference | rejection | pin",
+    ),
+    target: str | None = typer.Option(
+        None, "--target", help="Hypothesis ID this feedback is about (optional)."
+    ),
+) -> None:
+    """Inject researcher feedback into a running (or future) session."""
+    cfg, _ = ctx.obj
+    from . import ids as _ids
+    from .models import SystemFeedback
+    from .storage.repos import feedback as fb_repo
+    from .storage.repos import hypotheses as hyp_repo
+
+    async def _do() -> None:
+        conn = await db_mod.connect(cfg)
+        try:
+            fb = SystemFeedback(
+                id=_ids.feedback_id(), session_id=session_id,
+                created_at=datetime.now(UTC),
+                source="human", kind=kind,
+                target_id=target, text=text, active=True,
+            )
+            await fb_repo.insert(conn, fb)
+            # Pinning / rejection also flip the hypothesis state.
+            if kind == "pin" and target:
+                await hyp_repo.set_state(conn, target, "pinned")
+            elif kind == "rejection" and target:
+                await hyp_repo.set_state(conn, target, "rejected")
+        finally:
+            await conn.close()
+
+    asyncio.run(_do())
+    console.print(f"[green]Feedback recorded[/green] for session={session_id}")
 
 
 @app.command()
