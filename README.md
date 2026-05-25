@@ -54,33 +54,54 @@ The agents talk to one LLM provider per session, configured in
 provider = "anthropic"   # anthropic | openai | openai_compatible
 ```
 
-| provider              | Endpoint                                                       | Required key                                           |
-| --------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
-| `anthropic` *(default)* | api.anthropic.com — Claude                                   | `ANTHROPIC_API_KEY`                                    |
-| `openai`              | api.openai.com — GPT-5, GPT-4.1, o-series                      | `OPENAI_API_KEY`                                       |
-| `openai_compatible`   | Any OpenAI-compatible endpoint via `[llm.openai] base_url`     | `OPENAI_API_KEY` (or any non-empty string for keyless local servers) |
+| provider              | Endpoint                                                | Required key            | Example models                                            |
+| --------------------- | ------------------------------------------------------- | ----------------------- | --------------------------------------------------------- |
+| `anthropic` *(default)* | api.anthropic.com                                     | `ANTHROPIC_API_KEY`     | `claude-opus-4-7`, `claude-sonnet-4-6`                    |
+| `openai`              | api.openai.com                                          | `OPENAI_API_KEY`        | `gpt-5`, `gpt-4o`, `o3-mini`                              |
+| `openrouter`          | openrouter.ai — 200+ models from every major vendor     | `OPENROUTER_API_KEY`    | `anthropic/claude-3.5-sonnet`, `openai/gpt-5`, `google/gemini-2.5-pro`, `meta-llama/llama-3.3-70b-instruct` |
+| `gemini` / `google`   | generativelanguage.googleapis.com (OpenAI-compat)       | `GEMINI_API_KEY`        | `gemini-2.5-pro`, `gemini-2.5-flash`                      |
+| `groq`                | api.groq.com                                            | `GROQ_API_KEY`          | `llama-3.3-70b-versatile`, `mixtral-8x7b-32768`           |
+| `together`            | api.together.xyz                                        | `TOGETHER_API_KEY`      | `meta-llama/Llama-3.3-70B-Instruct-Turbo`                 |
+| `mistral`             | api.mistral.ai                                          | `MISTRAL_API_KEY`       | `mistral-large-latest`, `codestral-latest`                |
+| `ollama`              | localhost:11434 — local models                          | *(none)*                | `llama3.3:70b`, `qwen2.5:32b`                             |
+| `openai_compatible`   | Anything else; set `[llm.openai] base_url` explicitly   | `OPENAI_API_KEY` (or any non-empty string for keyless servers) | depends |
 
-`openai_compatible` covers Groq, Together, OpenRouter, Mistral
-*la plateforme*, Google Gemini's OpenAI-compat endpoint, local Ollama, vLLM,
-LM Studio, and anything else that speaks the OpenAI Chat Completions API.
-Example:
+OpenRouter exposes one API for every vendor:
 
 ```toml
 [llm]
-provider = "openai_compatible"
-[llm.openai]
-base_url = "https://api.groq.com/openai/v1"
+provider = "openrouter"
+[llm.openrouter]
+referer = "https://your-app.example.com"   # optional, for catalog attribution
+title   = "My Co-Scientist"
 
 [models]
-generation = "llama-3.3-70b-versatile"
-reflection = "llama-3.3-70b-versatile"
-# ...
+generation         = "anthropic/claude-3.5-sonnet"
+reflection         = "openai/gpt-5"
+ranking_pairwise   = "google/gemini-2.5-flash"
+metareview_final   = "anthropic/claude-opus-4-7"
 ```
 
-After selecting a provider, set each entry in `[models]` to a model id your
-provider can serve. Cost is estimated via `co_scientist/llm/routing.py`'s
-`PRICE_TABLE`; unknown models fall back to a sonnet-class default — edit the
-table or set tighter `[run] budget_usd` if running on a new model.
+Gemini directly:
+
+```toml
+[llm]
+provider = "gemini"
+
+[models]
+generation       = "gemini-2.5-pro"
+reflection       = "gemini-2.5-pro"
+ranking_pairwise = "gemini-2.5-flash"
+metareview_final = "gemini-2.5-pro"
+```
+
+Mixing vendors per session requires picking the provider once; for
+multi-vendor routing in a single session, use `provider = "openrouter"`
+and let OpenRouter dispatch to the upstream API per model.
+
+Cost is estimated via `co_scientist/llm/routing.py`'s `PRICE_TABLE`;
+unknown models fall back to a sonnet-class default — edit the table or
+set tighter `[run] budget_usd` if running on a new model.
 
 **Provider feature support:**
 

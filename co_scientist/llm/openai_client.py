@@ -116,7 +116,18 @@ class OpenAIClient:
         budget: TokenBudget,
         retry_policy: RetryPolicy | None = None,
         compat_mode: bool = False,
+        preset_base_url: str | None = None,
+        preset_api_key_env: str | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
+        """One client per session.
+
+        `preset_*` params come from `provider.get_provider()` when the user
+        configured a named preset (openrouter / gemini / groq / ...). They
+        provide a sensible default base_url and the env-var name we expect
+        the API key under, but user `[llm.openai] base_url` and
+        `OPENAI_API_KEY` always win if explicitly set.
+        """
         try:
             from openai import AsyncOpenAI
         except ImportError as e:  # pragma: no cover
@@ -136,28 +147,42 @@ class OpenAIClient:
             base_ms=cfg.retry.base_ms,
             cap_ms=cfg.retry.cap_ms,
         )
-        self._compat_mode = compat_mode
+        self._compat_mode = compat_mode or preset_base_url is not None
 
+        # API key resolution precedence:
+        #   1. explicit OPENAI_API_KEY (cfg.secrets or env)
+        #   2. preset-specific env var (e.g. OPENROUTER_API_KEY, GEMINI_API_KEY)
         api_key = (
             cfg.secrets.OPENAI_API_KEY
             or os.environ.get("OPENAI_API_KEY")
             or ""
         )
-        # Compat endpoints (Ollama, vLLM) may not require a real key but still
-        # demand a non-empty string for the SDK. Use a placeholder.
-        if not api_key and compat_mode:
+        if not api_key and preset_api_key_env:
+            api_key = (
+                getattr(cfg.secrets, preset_api_key_env, "")
+                or os.environ.get(preset_api_key_env)
+                or ""
+            )
+        # Local OpenAI-compat servers (Ollama, vLLM, LM Studio) often don't
+        # need a real key but the SDK rejects an empty string.
+        if not api_key and self._compat_mode:
             api_key = "compat-no-key"
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY not set")
+            raise RuntimeError(
+                f"no API key set ({preset_api_key_env or 'OPENAI_API_KEY'})"
+            )
 
+        # base_url precedence: explicit cfg / env > preset default.
         base_url = (
             getattr(cfg.llm.openai, "base_url", None)
             or os.environ.get("OPENAI_BASE_URL")
-            or None
+            or preset_base_url
         )
         kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
+        if default_headers:
+            kwargs["default_headers"] = default_headers
         self._client = AsyncOpenAI(**kwargs)
 
     # ----------------------------- main call ----------------------------- #

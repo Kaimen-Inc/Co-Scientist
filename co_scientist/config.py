@@ -169,7 +169,9 @@ class OpenAIProviderCfg(BaseModel):
 
     `base_url` overrides the SDK default. Use it to point at any
     OpenAI-compatible provider (Groq, Together, OpenRouter, Mistral,
-    Gemini OpenAI-compat, Ollama local, vLLM, ...).
+    Gemini OpenAI-compat, Ollama local, vLLM, ...). When a named preset
+    such as `provider = "openrouter"` is used, this only needs to be set
+    if you want to override the preset's base_url.
     """
 
     base_url: str | None = None
@@ -179,6 +181,18 @@ class AnthropicProviderCfg(BaseModel):
     """Anthropic provider settings. `base_url` is rarely used; honored if set."""
 
     base_url: str | None = None
+
+
+class OpenRouterProviderCfg(BaseModel):
+    """OpenRouter attribution headers.
+
+    OpenRouter ranks apps in its catalog by `HTTP-Referer` + `X-Title`.
+    Setting these is optional but recommended for production traffic;
+    leave blank for ad-hoc use.
+    """
+
+    referer: str = ""
+    title: str = ""
 
 
 class LLMCfg(BaseModel):
@@ -191,15 +205,24 @@ class LLMCfg(BaseModel):
     - "openai" — OpenAI Chat Completions. Extended reasoning is translated
       to `reasoning_effort` for the o-series models; cache breakpoints are
       stripped.
+    - "openrouter" — OpenRouter (openrouter.ai). 200+ models from every
+      major vendor in one place. Set OPENROUTER_API_KEY (or
+      OPENAI_API_KEY). Optional attribution in [llm.openrouter].
+    - "gemini" / "google" — Google Gemini via the official OpenAI-compat
+      endpoint. Set GEMINI_API_KEY. Models: "gemini-2.5-pro",
+      "gemini-2.5-flash", etc.
+    - "groq", "together", "mistral", "ollama" — convenience presets for
+      those endpoints; each reads its own API key env var
+      (GROQ_API_KEY, TOGETHER_API_KEY, MISTRAL_API_KEY).
     - "openai_compatible" — same client as `openai` but allows
-      `llm.openai.base_url` to point at any OpenAI-compatible endpoint
-      (Groq, Together, OpenRouter, Mistral via le-plateforme, Google
-      Gemini's OpenAI-compat endpoint, local Ollama / vLLM, …).
+      `llm.openai.base_url` to point at any other OpenAI-compatible
+      endpoint not yet covered by a preset.
     """
 
     provider: str = "anthropic"
     openai: OpenAIProviderCfg = Field(default_factory=OpenAIProviderCfg)
     anthropic: AnthropicProviderCfg = Field(default_factory=AnthropicProviderCfg)
+    openrouter: OpenRouterProviderCfg = Field(default_factory=OpenRouterProviderCfg)
 
 
 class WebUICfg(BaseModel):
@@ -213,8 +236,14 @@ class Secrets(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     ANTHROPIC_API_KEY: str = ""
-    VOYAGE_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+    TOGETHER_API_KEY: str = ""
+    MISTRAL_API_KEY: str = ""
+    OLLAMA_API_KEY: str = ""
+    VOYAGE_API_KEY: str = ""
     TAVILY_API_KEY: str = ""
     BRAVE_API_KEY: str = ""
     NCBI_API_KEY: str = ""

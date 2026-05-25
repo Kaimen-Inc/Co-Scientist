@@ -132,30 +132,38 @@ classifier_block_categories = ["cbrn", "csam", "weapons", "illicit_synthesis"]
 classifier_warn_categories = ["dual_use_bio"]
 
 # LLM provider selection. Choose one of:
-#   "anthropic"          — Claude via the official SDK (default).
-#                          Cache breakpoints, extended thinking, batch API.
-#   "openai"             — OpenAI Chat Completions (api.openai.com).
-#                          Reasoning translated to `reasoning_effort` on
-#                          o-series models. No cache breakpoints, no batch.
-#   "openai_compatible"  — Any OpenAI-compatible endpoint; set
-#                          `llm.openai.base_url` to point at it. Works with
-#                          Groq, Together, OpenRouter, Mistral, Gemini's
-#                          OpenAI-compat endpoint, local Ollama / vLLM, etc.
+#   "anthropic"  — Claude via the official SDK (default). Full feature set:
+#                  cache breakpoints, extended thinking, batch API.
+#   "openai"     — OpenAI Chat Completions (api.openai.com). Reasoning
+#                  translated to `reasoning_effort` on o-series models.
+#   "openrouter" — openrouter.ai (200+ models from every major vendor).
+#                  Set OPENROUTER_API_KEY. Models like
+#                  "anthropic/claude-3.5-sonnet", "openai/gpt-5",
+#                  "google/gemini-2.5-pro", "meta-llama/llama-3.3-70b".
+#   "gemini"     — Google Gemini via OpenAI-compat endpoint. Set
+#                  GEMINI_API_KEY. Models: "gemini-2.5-pro",
+#                  "gemini-2.5-flash", "gemini-1.5-pro".
+#   "groq"       — Groq (fast Llama / Mixtral). Set GROQ_API_KEY.
+#   "together"   — Together AI. Set TOGETHER_API_KEY.
+#   "mistral"    — Mistral la-plateforme. Set MISTRAL_API_KEY.
+#   "ollama"     — Local Ollama at http://localhost:11434/v1 (no key needed).
+#   "openai_compatible" — Any other OpenAI-compatible endpoint; set
+#                  [llm.openai] base_url to point at it.
 #
-# Pick a `[models]` section that names models your provider can serve.
+# After choosing a provider, set the entries in [models] to model ids it
+# can serve.
 [llm]
 provider = "anthropic"
 
-# Examples:
-#   provider = "openai"
-#   [llm.openai] base_url = ""                                  # default OpenAI
-#   provider = "openai_compatible"
-#   [llm.openai] base_url = "https://api.groq.com/openai/v1"    # Groq
-#   [llm.openai] base_url = "https://openrouter.ai/api/v1"      # OpenRouter
-#   [llm.openai] base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"  # Gemini
-#   [llm.openai] base_url = "http://localhost:11434/v1"         # Ollama
+# For provider = "openai" / "openai_compatible" / any preset above: this
+# overrides the preset's base_url (rarely needed).
 [llm.openai]
 # base_url = ""
+
+# OpenRouter attribution (optional; for catalog ranking).
+[llm.openrouter]
+# referer = "https://your-app.example.com"
+# title   = "My Co-Scientist App"
 
 [web_ui]
 host = "127.0.0.1"

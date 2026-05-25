@@ -34,6 +34,17 @@ PRICE_TABLE: dict[str, dict[str, float]] = {
     # Mistral, Meta (via providers)
     "mistral-large-latest":       {"input":  2.0,  "output":  6.0,  "cache_write":  2.0,  "cache_read": 0.2},
     "llama-3.3-70b":              {"input":  0.6,  "output":  0.6,  "cache_write":  0.6,  "cache_read": 0.6},
+    # OpenRouter passes through the upstream provider's price; common routes:
+    "anthropic/claude-opus-4-7":      {"input": 15.0,  "output": 75.0,  "cache_write": 18.75, "cache_read": 1.5},
+    "anthropic/claude-sonnet-4-6":    {"input":  3.0,  "output": 15.0,  "cache_write":  3.75, "cache_read": 0.3},
+    "anthropic/claude-3.5-sonnet":    {"input":  3.0,  "output": 15.0,  "cache_write":  3.75, "cache_read": 0.3},
+    "openai/gpt-5":                   {"input":  5.0,  "output": 20.0,  "cache_write":  5.0,  "cache_read": 0.5},
+    "openai/gpt-4o":                  {"input":  2.5,  "output": 10.0,  "cache_write":  2.5,  "cache_read": 0.25},
+    "openai/o3":                      {"input":  2.0,  "output":  8.0,  "cache_write":  2.0,  "cache_read": 0.5},
+    "google/gemini-2.5-pro":          {"input":  1.25, "output": 10.0,  "cache_write":  1.25, "cache_read": 0.3},
+    "google/gemini-2.5-flash":        {"input":  0.3,  "output":  2.5,  "cache_write":  0.3,  "cache_read": 0.075},
+    "meta-llama/llama-3.3-70b-instruct": {"input": 0.6, "output": 0.6,  "cache_write":  0.6,  "cache_read": 0.6},
+    "mistralai/mistral-large":        {"input":  2.0,  "output":  6.0,  "cache_write":  2.0,  "cache_read": 0.2},
 }
 
 # Conservative fallback for any model name not in the table — we'd rather

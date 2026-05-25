@@ -34,8 +34,17 @@ def _route(model: str = "gpt-5", thinking: int = 0) -> ModelRoute:
 # ----------------------------- factory ----------------------------- #
 
 
-def test_known_providers_listed() -> None:
-    assert {"anthropic", "openai", "openai_compatible"} == KNOWN_PROVIDERS
+def test_known_providers_includes_presets() -> None:
+    assert "anthropic" in KNOWN_PROVIDERS
+    assert "openai" in KNOWN_PROVIDERS
+    assert "openai_compatible" in KNOWN_PROVIDERS
+    assert "openrouter" in KNOWN_PROVIDERS
+    assert "gemini" in KNOWN_PROVIDERS
+    assert "google" in KNOWN_PROVIDERS
+    assert "groq" in KNOWN_PROVIDERS
+    assert "together" in KNOWN_PROVIDERS
+    assert "mistral" in KNOWN_PROVIDERS
+    assert "ollama" in KNOWN_PROVIDERS
 
 
 def test_get_provider_returns_anthropic_by_default() -> None:
@@ -86,6 +95,114 @@ def test_compat_mode_allows_empty_api_key() -> None:
     with patch("openai.AsyncOpenAI") as mock_sdk:
         OpenAIClient(cfg, db=MagicMock(), budget=MagicMock(), compat_mode=True)
     assert mock_sdk.call_args.kwargs["api_key"]  # placeholder, non-empty
+
+
+# ----------------------------- presets ----------------------------- #
+
+
+def test_provider_openrouter_uses_preset_base_url_and_key() -> None:
+    """`provider = "openrouter"` should configure OpenRouter's base_url and
+    pull from OPENROUTER_API_KEY when OPENAI_API_KEY is unset."""
+    cfg = Config()
+    cfg.llm.provider = "openrouter"
+    cfg.secrets.OPENAI_API_KEY = ""
+    cfg.secrets.OPENROUTER_API_KEY = "sk-or-fake"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    kwargs = mock_sdk.call_args.kwargs
+    assert kwargs["base_url"] == "https://openrouter.ai/api/v1"
+    assert kwargs["api_key"] == "sk-or-fake"
+
+
+def test_openrouter_sends_attribution_headers() -> None:
+    cfg = Config()
+    cfg.llm.provider = "openrouter"
+    cfg.llm.openrouter.referer = "https://example.com"
+    cfg.llm.openrouter.title = "My App"
+    cfg.secrets.OPENROUTER_API_KEY = "sk-or-fake"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    headers = mock_sdk.call_args.kwargs.get("default_headers", {})
+    assert headers.get("HTTP-Referer") == "https://example.com"
+    assert headers.get("X-Title") == "My App"
+
+
+def test_openrouter_skips_headers_when_unset() -> None:
+    cfg = Config()
+    cfg.llm.provider = "openrouter"
+    cfg.secrets.OPENROUTER_API_KEY = "sk-or-fake"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    # Either no default_headers, or an empty dict — never partial attribution.
+    headers = mock_sdk.call_args.kwargs.get("default_headers", {})
+    assert "HTTP-Referer" not in headers
+    assert "X-Title" not in headers
+
+
+def test_provider_gemini_uses_compat_endpoint() -> None:
+    cfg = Config()
+    cfg.llm.provider = "gemini"
+    cfg.secrets.OPENAI_API_KEY = ""
+    cfg.secrets.GEMINI_API_KEY = "gemini-fake"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    kwargs = mock_sdk.call_args.kwargs
+    assert "generativelanguage.googleapis.com" in kwargs["base_url"]
+    assert kwargs["api_key"] == "gemini-fake"
+
+
+def test_provider_google_is_alias_for_gemini() -> None:
+    cfg = Config()
+    cfg.llm.provider = "google"
+    cfg.secrets.GEMINI_API_KEY = "gemini-fake"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    kwargs = mock_sdk.call_args.kwargs
+    assert "generativelanguage.googleapis.com" in kwargs["base_url"]
+
+
+def test_provider_groq_preset() -> None:
+    cfg = Config()
+    cfg.llm.provider = "groq"
+    cfg.secrets.GROQ_API_KEY = "gsk-fake"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    assert mock_sdk.call_args.kwargs["base_url"] == "https://api.groq.com/openai/v1"
+
+
+def test_explicit_openai_api_key_overrides_preset_env() -> None:
+    """OPENAI_API_KEY takes precedence over a preset's specific env var."""
+    cfg = Config()
+    cfg.llm.provider = "openrouter"
+    cfg.secrets.OPENAI_API_KEY = "user-explicit"
+    cfg.secrets.OPENROUTER_API_KEY = "sk-or"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    assert mock_sdk.call_args.kwargs["api_key"] == "user-explicit"
+
+
+def test_user_base_url_overrides_preset() -> None:
+    """If the user sets [llm.openai] base_url explicitly, it wins even when
+    using a preset (lets users point a preset at a private mirror)."""
+    cfg = Config()
+    cfg.llm.provider = "openrouter"
+    cfg.llm.openai.base_url = "https://my-private-mirror/v1"
+    cfg.secrets.OPENROUTER_API_KEY = "sk-or"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    assert mock_sdk.call_args.kwargs["base_url"] == "https://my-private-mirror/v1"
+
+
+def test_ollama_works_without_any_key() -> None:
+    cfg = Config()
+    cfg.llm.provider = "ollama"
+    cfg.secrets.OPENAI_API_KEY = ""
+    cfg.secrets.OLLAMA_API_KEY = ""
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    kwargs = mock_sdk.call_args.kwargs
+    assert kwargs["base_url"] == "http://localhost:11434/v1"
+    assert kwargs["api_key"]  # placeholder, non-empty
 
 
 # ----------------------------- request translation ----------------------------- #
