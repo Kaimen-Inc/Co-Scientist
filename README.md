@@ -184,6 +184,41 @@ candidate independently generates hypotheses; then every candidate-pair
 plays `--matches` head-to-head debates, judged by ONE fixed judge model
 (picked separately so no candidate scores its own work).
 
+### Presets at a glance
+
+| `--preset`               | What it does |
+| ---                      | --- |
+| `paper`                  | Co-Scientist paper baselines (plus Haiku) via OpenRouter, head-to-head Elo only |
+| `paper-aml`              | Same candidates + the paper's AML drug-repurposing goal + 5-drug gold-set recall (Binimetinib, Pacritinib, Cerivastatin, Pravastatin, DMF) |
+| `paper-aml-vs-raw`       | `paper-aml` but each model runs **both** in the full pipeline AND as a single raw LM call — isolates the multi-agent harness's value-add |
+| `frontier-aml-vs-raw`    | Same pipeline-vs-raw setup but with current frontier models (Claude Opus 4.7, GPT-5, Gemini 3 Pro / Flash) |
+
+### Pipeline vs raw LM (one model, isolated)
+
+The `--preset *-vs-raw` presets pit each model's **full co-scientist Generation
+pipeline** (literature tools + tool loop + dedup + `record_hypothesis`)
+against a **single raw LM call** with the same model + a forced
+`record_hypothesis` function call (no tools). Lets you measure how much
+of the system's output quality comes from the multi-agent harness vs the
+underlying model.
+
+Live 2-model vs-raw run on the AML goal (12 matches, judged by
+`google/gemini-3-flash-preview`, $0.15 total):
+
+```
+                                          W-L   mean Elo  $ spent   latency
+flash3   [pipeline]  google/gemini-3-...  4-2    1234     $0.0275   14.9s
+flash3   [raw]       google/gemini-3-...  5-1    1228     $0.0033    5.0s
+gpt4o    [pipeline]  openai/gpt-4o        3-3    1201     $0.1040   18.5s
+gpt4o    [raw]       openai/gpt-4o        0-6    1154     $0.0105    3.7s
+```
+
+Read: for `gemini-3-flash-preview`, the multi-agent harness is **within
+noise** of the raw model (Elo 1234 vs 1228) but costs 8× more and is
+3× slower. For `gpt-4o`, the harness **wins decisively** (Elo 1201 vs
+1154, win-rate 3-3 vs 0-6). The value-add of the agent stack depends on
+the base model — strong reasoning-tuned models often need it less.
+
 ### Quick start: `--preset paper`
 
 Reproduce the Co-Scientist paper's preference-ranking baselines
@@ -217,13 +252,39 @@ documented echo-bias. The judge-side default
 (`google/gemini-3-flash-preview`) is configurable via `--judge`; consider
 running with a different judge family if you want to control for that.
 
+### AML drug-repurposing benchmark (gold-set scoring)
+
+`co-scientist bench --preset paper-aml` runs every candidate against the
+paper's AML drug-repurposing goal and additionally scores **recall**
+against the 5 drugs the paper surfaced (Binimetinib, Pacritinib,
+Cerivastatin, Pravastatin, Dimethyl fumarate, plus common aliases like
+DMF, BG-12, MEK162, Mektovi, Pravachol). Matching is whole-token,
+case-insensitive, and looks at every searched field of every hypothesis
+(title / summary / full_text / `entities` / citation excerpts).
+
+```bash
+co-scientist bench --preset paper-aml \
+  --n 3 --matches 2 \
+  --budget-per-candidate 1.5 --judge-budget 0.50
+```
+
+Note: with small `--n` the chance of any one model hitting any one of
+the 5 specific drugs by luck is low. The Co-Scientist paper surfaced
+these after running 15 expert-curated goals; for an apples-to-apples
+comparison raise `--n` to 5+ and run multiple seeds.
+
 ### Custom candidates
+
+`label=provider:model[@mode]`. `mode` is `pipeline` (default) or
+`direct`. Pipeline goes through the full Generation agent stack;
+direct is a single forced-tool LM call with no literature tools.
 
 ```bash
 co-scientist bench "Identify hypotheses about X" \
   -c flash3=openrouter:google/gemini-3-flash-preview \
+  -c flash3-raw=openrouter:google/gemini-3-flash-preview@direct \
   -c gpt5=openai:gpt-5 \
-  -c opus=anthropic:claude-opus-4-7 \
+  -c opus=anthropic:claude-opus-4.7 \
   --judge anthropic:claude-sonnet-4-6
 ```
 

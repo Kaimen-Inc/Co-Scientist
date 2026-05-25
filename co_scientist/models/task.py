@@ -12,6 +12,7 @@ TaskAction = Literal[
     # Generation
     "CreateInitialHypotheses",
     "GenerateFromFeedback",
+    "DirectGeneration",         # bench-only: single LM call, no tool loop
     # Reflection
     "ReviewHypothesis",
     # Ranking

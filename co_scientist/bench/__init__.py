@@ -19,7 +19,18 @@ share Elo state with regular sessions. They reuse the underlying
 GenerationAgent and the Elo math.
 """
 
+from .goldset import GOLDSETS, GoldEntity, GoldSet, HitRecord
 from .presets import PRESETS, get_preset
 from .runner import BenchCandidate, BenchOutcome, run_bench
 
-__all__ = ["PRESETS", "BenchCandidate", "BenchOutcome", "get_preset", "run_bench"]
+__all__ = [
+    "GOLDSETS",
+    "PRESETS",
+    "BenchCandidate",
+    "BenchOutcome",
+    "GoldEntity",
+    "GoldSet",
+    "HitRecord",
+    "get_preset",
+    "run_bench",
+]

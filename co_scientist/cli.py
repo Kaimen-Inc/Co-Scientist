@@ -407,20 +407,26 @@ def eval_cmd(
 @app.command("bench")
 def bench_cmd(
     ctx: typer.Context,
-    goal: str = typer.Argument(..., help="Research goal."),
+    goal: str | None = typer.Argument(
+        None, help="Research goal. Optional when --preset bundles a default goal."
+    ),
     preset: str | None = typer.Option(
         None, "--preset",
         help=(
-            "Use a built-in candidate list. Available: 'paper' "
-            "(Co-Scientist paper baselines via OpenRouter + Haiku). "
+            "Use a built-in candidate list. Available: "
+            "'paper' (Co-Scientist paper baselines + Haiku), "
+            "'paper-aml' (same candidates + AML drug-repurposing goal + "
+            "5-drug recall scoring against the paper's answer key). "
             "Mutually exclusive with --candidate."
         ),
     ),
     candidate: list[str] = typer.Option(
         None, "--candidate", "-c",
         help=(
-            "Repeat: label=provider:model. e.g. "
-            "'gemini-flash=openrouter:google/gemini-3-flash-preview'"
+            "Repeat: label=provider:model[@mode]. Mode is `pipeline` "
+            "(default) or `direct` (single raw LM call, no tools). e.g. "
+            "'gemini-flash=openrouter:google/gemini-3-flash-preview', "
+            "'flash-raw=openrouter:google/gemini-3-flash-preview@direct'."
         ),
     ),
     n: int = typer.Option(2, "--n", help="Hypotheses per candidate."),
@@ -458,14 +464,23 @@ def bench_cmd(
         raise typer.Exit(2)
 
     candidates: list[BenchCandidate]
+    goldset = None
     if preset:
         p = get_preset(preset)
         candidates = list(p.candidates)
         if judge is None:
             judge = p.suggested_judge
+        if goal is None and p.default_goal is not None:
+            goal = p.default_goal
+        if p.goldset is not None:
+            goldset = p.goldset
         console.print(f"[dim]Using preset '{p.name}': {p.description}[/dim]")
         for c in candidates:
-            console.print(f"[dim]  • {c.label}: {c.provider}:{c.model}[/dim]")
+            mode_suffix = f" [{c.mode}]" if c.mode != "pipeline" else ""
+            console.print(f"[dim]  • {c.label}{mode_suffix}: {c.provider}:{c.model}[/dim]")
+        if goldset:
+            ent_list = ", ".join(e.name for e in goldset.entities)
+            console.print(f"[dim]  gold set: {goldset.label} ({ent_list})[/dim]")
     else:
         if not candidate:
             console.print(
@@ -476,13 +491,32 @@ def bench_cmd(
         for entry in candidate:
             if "=" not in entry or ":" not in entry.split("=", 1)[1]:
                 console.print(
-                    f"[red]--candidate must look like label=provider:model, got {entry!r}[/red]"
+                    f"[red]--candidate must look like label=provider:model[@mode], got {entry!r}[/red]"
                 )
                 raise typer.Exit(2)
             label, rest = entry.split("=", 1)
+            # Optional @mode suffix selects pipeline vs direct.
+            mode = "pipeline"
+            if "@" in rest:
+                rest, mode = rest.rsplit("@", 1)
+                mode = mode.strip().lower()
+                if mode not in ("pipeline", "direct"):
+                    console.print(
+                        f"[red]unknown mode {mode!r} in {entry!r}; "
+                        f"use `pipeline` or `direct`[/red]"
+                    )
+                    raise typer.Exit(2)
             provider, model = rest.split(":", 1)
-            candidates.append(BenchCandidate(label=label, provider=provider, model=model))
+            candidates.append(BenchCandidate(
+                label=label, provider=provider, model=model, mode=mode,
+            ))
 
+    if goal is None:
+        console.print(
+            "[red]Must provide a research goal (positional argument) or a "
+            "--preset that bundles one.[/red]"
+        )
+        raise typer.Exit(2)
     if judge is None:
         judge = "anthropic:claude-sonnet-4-6"
     if ":" not in judge:
@@ -498,31 +532,55 @@ def bench_cmd(
             judge_provider=judge_provider, judge_model=judge_model,
             per_candidate_budget_usd=budget_per_candidate,
             judge_budget_usd=judge_budget,
+            goldset=goldset,
         )
     )
 
-    tbl = Table(title=f"Bench {outcome.bench_id} — {outcome.matches_played} matches")
+    has_gold = goldset is not None
+    title = f"Bench {outcome.bench_id} — {outcome.matches_played} matches"
+    if has_gold:
+        title += f" • gold-set {goldset.label} (recall / {len(goldset.entities)})"
+    tbl = Table(title=title)
     tbl.add_column("rank", justify="right")
     tbl.add_column("label", style="bold")
-    tbl.add_column("provider")
+    tbl.add_column("mode")
     tbl.add_column("model")
     tbl.add_column("n_hyps", justify="right")
     tbl.add_column("W-L", justify="right")
     tbl.add_column("mean_elo", justify="right")
+    if has_gold:
+        tbl.add_column("gold hits", justify="right")
     tbl.add_column("$ spent", justify="right")
     tbl.add_column("p50_ms", justify="right")
     for i, row in enumerate(outcome.candidates, 1):
-        tbl.add_row(
-            str(i), row["label"], row["provider"], row["model"],
+        row_cells = [
+            str(i), row["label"],
+            row.get("mode") or "pipeline",
+            row["model"],
             str(row["n_hypotheses"]),
             f"{row['wins']}-{row['losses']}",
             f"{row['mean_elo']:.0f}" if row["mean_elo"] is not None else "—",
+        ]
+        if has_gold:
+            n_hit = row.get("gold_hits") or 0
+            row_cells.append(f"{n_hit}/{len(goldset.entities)}")
+        row_cells.extend([
             f"{row['cost_usd']:.4f}",
             str(row["mean_latency_ms"] or "—"),
-        )
+        ])
+        tbl.add_row(*row_cells)
     console.print(tbl)
     console.print(f"[dim]Total cost: ${outcome.total_cost_usd:.4f}[/dim]")
     console.print(f"[dim]Artifact: {outcome.artifact_path}[/dim]")
+
+    if has_gold:
+        # Per-candidate hit detail so you can see which specific entities surfaced.
+        for row in outcome.candidates:
+            hits = row.get("gold_hit_names") or []
+            if hits:
+                console.print(
+                    f"[dim]  {row['label']} surfaced: {', '.join(hits)}[/dim]"
+                )
 
 
 @tools_app.command("list")

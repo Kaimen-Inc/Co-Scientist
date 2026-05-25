@@ -54,6 +54,53 @@ def test_paper_preset_has_documented_candidates() -> None:
     # All routed through OpenRouter so a single API key suffices.
     for c in p.candidates:
         assert c.provider == "openrouter"
+    # paper preset has no default goal / gold set.
+    assert p.default_goal is None
+    assert p.goldset is None
+
+
+def test_paper_aml_preset_bundles_goal_and_goldset() -> None:
+    p = get_preset("paper-aml")
+    assert p.default_goal is not None
+    assert "AML" in p.default_goal or "acute myeloid leukemia" in p.default_goal.lower()
+    assert p.goldset is not None
+    entity_names = {e.name for e in p.goldset.entities}
+    # The five drugs the paper surfaced.
+    assert entity_names == {
+        "Binimetinib", "Pacritinib", "Cerivastatin", "Pravastatin",
+        "Dimethyl fumarate",
+    }
+
+
+def test_vs_raw_preset_doubles_every_candidate() -> None:
+    p = get_preset("paper-aml-vs-raw")
+    # Same 4 base candidates x 2 modes = 8 entries.
+    assert len(p.candidates) == 8
+    modes = {c.mode for c in p.candidates}
+    assert modes == {"pipeline", "direct"}
+    # Labels are suffixed so the result table is unambiguous.
+    pipe_labels = [c.label for c in p.candidates if c.mode == "pipeline"]
+    raw_labels = [c.label for c in p.candidates if c.mode == "direct"]
+    assert all(lbl.endswith("[pipe]") for lbl in pipe_labels)
+    assert all(lbl.endswith("[raw]") for lbl in raw_labels)
+    # Each base model appears in both modes (same model id, different mode).
+    base_models = {c.model for c in p.candidates}
+    for m in base_models:
+        modes_for_m = {c.mode for c in p.candidates if c.model == m}
+        assert modes_for_m == {"pipeline", "direct"}
+
+
+def test_frontier_vs_raw_preset_lists_current_models() -> None:
+    p = get_preset("frontier-aml-vs-raw")
+    base_models = {c.model for c in p.candidates}
+    # We don't pin exact strings (those drift) but require that the
+    # frontier set is structurally distinct from the paper baselines.
+    paper_models = {c.model for c in get_preset("paper-aml").candidates}
+    assert base_models != paper_models
+    assert len(base_models) >= 3
+    # All routed via OpenRouter so one key works.
+    for c in p.candidates:
+        assert c.provider == "openrouter"
 
 
 def test_get_preset_raises_on_unknown_name() -> None:

@@ -33,6 +33,7 @@ from ..storage.repos import hypotheses as hyp_repo
 from ..storage.repos import sessions as sess_repo
 from ..storage.repos import tasks as task_repo
 from ..tools.registry import ToolRegistry
+from .goldset import GoldSet, HitRecord, score_candidate_against_goldset
 
 log = get_logger("bench")
 
@@ -72,11 +73,23 @@ RECORD_VERDICT_TOOL: dict = {
 
 @dataclass
 class BenchCandidate:
-    """One model to evaluate in the bench."""
+    """One model to evaluate in the bench.
+
+    `mode` selects the generation harness:
+    - "pipeline" (default) — runs through the full co-scientist Generation
+      agent: literature tools (pubmed/arxiv/europe_pmc), tool loop, the
+      record_hypothesis structured output, dedup. This is what the rest
+      of the system uses end-to-end.
+    - "direct" — single LM call to the model with the goal + a forced
+      record_hypothesis function call. No tool loop, no literature
+      access. Lets you measure the value-add of the multi-agent harness
+      against a raw model on the same goal.
+    """
 
     label: str
     provider: str          # anthropic | openai | openrouter | gemini | ...
     model: str             # provider-specific model id
+    mode: str = "pipeline" # pipeline | direct
 
 
 @dataclass
@@ -86,6 +99,7 @@ class _CandidateState:
     candidate_id: str
     spec: BenchCandidate
     hypotheses: list[Hypothesis] = field(default_factory=list)
+    hypothesis_records: list[dict] = field(default_factory=list)   # for gold-set scoring
     elos: dict[str, float] = field(default_factory=dict)   # hyp_id -> Elo
     matches_played: dict[str, int] = field(default_factory=dict)
     wins: int = 0
@@ -94,6 +108,7 @@ class _CandidateState:
     input_tok: int = 0
     output_tok: int = 0
     latencies_ms: list[int] = field(default_factory=list)
+    gold_hits: dict[str, list[HitRecord]] = field(default_factory=dict)
     error: str | None = None
 
 
@@ -123,6 +138,7 @@ async def run_bench(
     per_candidate_budget_usd: float = 5.0,
     judge_budget_usd: float = 5.0,
     preferences_text: str | None = None,
+    goldset: GoldSet | None = None,
 ) -> BenchOutcome:
     """Execute a bench. See module docstring for semantics."""
     if not candidates:
@@ -195,14 +211,32 @@ async def run_bench(
                 matches_per_pair=matches_per_pair,
             )
 
-        # 4. Aggregate stats per candidate + write to bench_candidates.
+        # 4. Optional gold-set scoring: did the candidate surface any of the
+        #    curated answer-key entities?
+        if goldset is not None:
+            for st in states:
+                if not st.hypothesis_records:
+                    continue
+                st.gold_hits = score_candidate_against_goldset(
+                    st.hypothesis_records, goldset,
+                )
+            await conn.execute(
+                "UPDATE bench_runs SET goldset_label=?, goldset_size=? WHERE id=?",
+                (goldset.label, len(goldset.entities), bench_id_),
+            )
+            await conn.commit()
+
+        # 5. Aggregate stats per candidate + write to bench_candidates.
         for st in states:
             await _persist_candidate_stats(conn, st)
 
         total_cost = sum(s.cost_usd for s in states)
 
-        # 5. Write a JSON artifact + flip status.
-        summary = _build_summary(bench_id_, goal, states, judge_provider, judge_model, n_matches)
+        # 6. Write a JSON artifact + flip status.
+        summary = _build_summary(
+            bench_id_, goal, states, judge_provider, judge_model, n_matches,
+            goldset=goldset,
+        )
         artifact_path = await write_json(
             base_cfg, ses.id, "bench", bench_id_, summary
         )
@@ -255,9 +289,9 @@ async def _generate_for_all_candidates(
     for c in candidates:
         cand_id = ids.bench_candidate_id()
         await conn.execute(
-            """INSERT INTO bench_candidates(id, bench_id, label, provider, model)
-               VALUES (?, ?, ?, ?, ?)""",
-            (cand_id, bench_id_, c.label, c.provider, c.model),
+            """INSERT INTO bench_candidates(id, bench_id, label, provider, model, mode)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (cand_id, bench_id_, c.label, c.provider, c.model, c.mode),
         )
         states.append(_CandidateState(candidate_id=cand_id, spec=c))
     await conn.commit()
@@ -284,7 +318,14 @@ async def _generate_for_candidate(
     n_hyps: int,
     budget_usd: float,
 ) -> None:
-    """Run GenerationAgent.execute() N times under the candidate's config."""
+    """Run Generation N times under the candidate's config.
+
+    Two paths depending on `st.spec.mode`:
+    - "pipeline": full GenerationAgent (literature tools + tool loop +
+      record_hypothesis + dedup).
+    - "direct": a single LM call asking the model to produce one
+      hypothesis via a forced record_hypothesis function call. No tools.
+    """
     cfg = _candidate_cfg(base_cfg, st.spec.provider, st.spec.model)
     cfg.models.generation = st.spec.model
 
@@ -292,6 +333,13 @@ async def _generate_for_candidate(
         cfg=cfg, budget_tokens=cfg.run.budget_tokens, budget_usd=budget_usd,
     )
     llm = get_provider(cfg, db=conn, budget=budget)
+
+    if st.spec.mode == "direct":
+        await _generate_direct_for_candidate(
+            base_cfg, cfg, conn, ses, st, n_hyps, llm, budget,
+        )
+        return
+
     tools = ToolRegistry(cfg).discover()
     deps = AgentDeps(cfg=cfg, db=conn, llm=llm, tools=tools)
     agent = GenerationAgent(deps)
@@ -333,8 +381,207 @@ async def _generate_for_candidate(
             st.hypotheses.append(h)
             st.elos[hid] = float(base_cfg.ranking.elo_initial)
             st.matches_played[hid] = 0
+            # Pull the persisted record artifact for gold-set scoring later.
+            # The Hypothesis model only carries title/summary/full_text, but
+            # the artifact has the structured `entities` + `citations` array
+            # that we need for robust gold-entity matching.
+            try:
+                from ..storage.artifacts import read_json
+                doc = await read_json(base_cfg, h.artifact_path)
+                record = doc.get("record") if isinstance(doc, dict) else None
+                if isinstance(record, dict):
+                    record.setdefault("id", hid)
+                    record.setdefault("title", h.title)
+                    record.setdefault("summary", h.summary)
+                    record.setdefault("full_text", h.full_text)
+                    st.hypothesis_records.append(record)
+            except Exception as e:
+                log.debug("bench_record_load_failed", hid=hid, err=str(e))
 
     # Budget accounting: pull the post-run snapshot.
+    snap = budget.snapshot().get("_global", {})
+    st.cost_usd = float(snap.get("used_usd", 0.0)) - initial_cost
+    st.input_tok = int(snap.get("used_tokens", 0))
+
+
+async def _generate_direct_for_candidate(
+    base_cfg: Config,
+    cfg: Config,
+    conn: aiosqlite.Connection,
+    ses: Session,
+    st: _CandidateState,
+    n_hyps: int,
+    llm,
+    budget: TokenBudget,
+) -> None:
+    """Single LM call per hypothesis. No tools, no agent loop.
+
+    The point of this mode is to isolate the model's *raw* contribution
+    so we can measure the value-add of the multi-agent harness. We still
+    use the record_hypothesis structured-output tool so the result is a
+    valid Hypothesis row (same schema, same downstream judging).
+    """
+    from ..agents.generation import _render_hypothesis_md
+    from ..agents.schemas import RECORD_HYPOTHESIS_TOOL
+    from ..llm.anthropic_client import AgentCallSpec, CachedBlock, CallContext
+    from ..llm.routing import ModelRoute, thinking_budget_for
+    from ..models import CitedPaper, Hypothesis
+    from ..storage.artifacts import write_json
+    from ..storage.repos import hypotheses as hyp_repo
+
+    plan = ses.research_plan
+    initial_cost = 0.0
+    for i in range(n_hyps):
+        task = Task(
+            id=ids.task_id(), session_id=ses.id,
+            created_at=datetime.now(UTC),
+            agent="generation", action="DirectGeneration",
+            payload={"strategy": "literature", "n": 1, "mode": "direct"},
+            priority=100, status="pending",
+            idempotency_key=f"bench::{st.candidate_id}::direct::{i}",
+        )
+        await task_repo.enqueue(conn, task)
+        await task_repo.mark_in_progress(conn, task.id)
+
+        sys_text = (
+            "You are a scientific researcher. You are given a research goal "
+            "and must propose ONE novel, specific, testable hypothesis. "
+            "Call the `record_hypothesis` tool exactly once with the full "
+            "structured record. Do NOT respond with free-text reasoning "
+            "before calling the tool. Cite real papers — every citation "
+            "URL must be a real, fetchable URL you know exists. If you "
+            "are unsure of a URL, omit the citation."
+        )
+        prompt = (
+            f"Research goal:\n{plan.objective}\n\n"
+            + (f"Preferences:\n- {chr(10).join(plan.preferences)}\n\n"
+               if plan.preferences else "")
+            + "Propose one specific, novel hypothesis answering the goal. "
+            "Be concrete about entities, mechanism, and an anticipated "
+            "experiment. Call record_hypothesis with strategy=\"literature\"."
+        )
+
+        spec = AgentCallSpec(
+            route=ModelRoute(
+                agent="generation", mode="literature",
+                model=st.spec.model,
+                thinking_tokens=thinking_budget_for(cfg, "generation.literature"),
+            ),
+            system_blocks=[CachedBlock(sys_text, cache=False)],
+            user_blocks=[CachedBlock(prompt, cache=False)],
+            tools=[RECORD_HYPOTHESIS_TOOL],
+            tool_choice={"type": "tool", "name": "record_hypothesis"},
+            # Reasoning models (gpt-5, o-series) burn output tokens on
+            # internal reasoning before producing the tool call. 4096
+            # often runs out before the call lands; 12k leaves enough
+            # headroom for ~8k of reasoning + a few k of structured output.
+            max_output_tokens=12288,
+        )
+        ctx = CallContext(
+            session_id=ses.id, task_id=task.id,
+            agent="generation", action="DirectGeneration", mode="literature",
+        )
+        t0 = time.monotonic()
+        try:
+            resp = await llm.call(spec, ctx)
+        except Exception as e:
+            await task_repo.fail(
+                conn, task.id, error=str(e),
+                max_attempts=cfg.lease.max_attempts,
+            )
+            log.warning("bench_direct_failed",
+                        candidate=st.spec.label, idx=i, err=str(e))
+            continue
+
+        latency = int((time.monotonic() - t0) * 1000)
+        st.latencies_ms.append(latency)
+
+        # Extract the record_hypothesis tool_use input.
+        record: dict[str, Any] | None = None
+        for b in getattr(resp.raw, "content", None) or []:
+            if (
+                getattr(b, "type", None) == "tool_use"
+                and getattr(b, "name", "") == "record_hypothesis"
+            ):
+                inp = getattr(b, "input", None)
+                if isinstance(inp, dict):
+                    record = inp
+                    break
+        if record is None:
+            stop = getattr(resp.raw, "stop_reason", None)
+            reason = (
+                "hit max_tokens before tool call (raise --budget-per-candidate "
+                "or model needs less reasoning)"
+                if stop == "max_tokens"
+                else f"record_hypothesis not called (stop_reason={stop})"
+            )
+            await task_repo.fail(
+                conn, task.id, error=reason,
+                max_attempts=cfg.lease.max_attempts,
+            )
+            log.warning("bench_direct_no_record",
+                        candidate=st.spec.label, idx=i, reason=reason)
+            continue
+
+        statement = record.get("statement") or record.get("title") or ""
+        if not statement:
+            await task_repo.fail(
+                conn, task.id, error="record_hypothesis missing statement",
+                max_attempts=cfg.lease.max_attempts,
+            )
+            log.warning("bench_direct_invalid_record",
+                        candidate=st.spec.label, idx=i)
+            continue
+
+        origin = f"generation/direct/{st.candidate_id}"
+        hid = ids.hypothesis_id(ses.id, origin, statement)
+        record.setdefault("strategy", "literature")
+        full_text = _render_hypothesis_md(record)
+        artifact_path = await write_json(
+            cfg, ses.id, "hypotheses", hid,
+            {"strategy": "literature", "mode": "direct", "record": record},
+        )
+        citations = [
+            CitedPaper(
+                title=c.get("title", ""),
+                url=c.get("url", ""),
+                excerpt=c.get("excerpt"),
+                doi=c.get("doi"),
+                year=c.get("year"),
+            )
+            for c in record.get("citations", [])
+            if isinstance(c, dict) and c.get("url")
+        ]
+        h = Hypothesis(
+            id=hid, session_id=ses.id, created_at=datetime.now(UTC),
+            created_by="generation",
+            strategy="literature",
+            parent_ids=[],
+            title=(record.get("title") or "")[:300],
+            summary=(record.get("statement") or "")[:1000],
+            full_text=full_text,
+            citations=citations,
+            artifact_path=artifact_path,
+            state="draft",
+        )
+        inserted = await hyp_repo.insert(conn, h)
+        await task_repo.complete(conn, task.id)
+        if not inserted:
+            # Same statement already exists from a previous iteration of this
+            # candidate — skip (rare but possible if the model is repetitive).
+            continue
+
+        st.hypotheses.append(h)
+        st.elos[hid] = float(base_cfg.ranking.elo_initial)
+        st.matches_played[hid] = 0
+        # Keep the record for gold-set scoring.
+        record_copy = dict(record)
+        record_copy.setdefault("id", hid)
+        record_copy.setdefault("title", h.title)
+        record_copy.setdefault("summary", h.summary)
+        record_copy.setdefault("full_text", h.full_text)
+        st.hypothesis_records.append(record_copy)
+
     snap = budget.snapshot().get("_global", {})
     st.cost_usd = float(snap.get("used_usd", 0.0)) - initial_cost
     st.input_tok = int(snap.get("used_tokens", 0))
@@ -609,18 +856,21 @@ async def _persist_candidate_stats(conn: aiosqlite.Connection, st: _CandidateSta
     mean_elo = sum(elos) / len(elos) if elos else None
     top_elo = max(elos) if elos else None
     mean_latency = (sum(st.latencies_ms) // len(st.latencies_ms)) if st.latencies_ms else None
+    hit_names = sorted(st.gold_hits)
     await conn.execute(
         """UPDATE bench_candidates SET
                n_hypotheses=?, n_matches=?, wins=?, losses=?,
                mean_elo=?, top_elo=?,
                total_cost_usd=?, total_input_tok=?, total_output_tok=?,
-               mean_latency_ms=?, error=?
+               mean_latency_ms=?, error=?,
+               gold_hits=?, gold_hit_names=?
             WHERE id=?""",
         (
             len(st.hypotheses), st.wins + st.losses, st.wins, st.losses,
             mean_elo, top_elo,
             st.cost_usd, st.input_tok, st.output_tok,
             mean_latency, st.error,
+            len(hit_names), json.dumps(hit_names) if hit_names else None,
             st.candidate_id,
         ),
     )
@@ -634,15 +884,27 @@ def _build_summary(
     judge_provider: str,
     judge_model: str,
     n_matches: int,
+    *,
+    goldset: GoldSet | None = None,
 ) -> dict[str, Any]:
     rows = []
+    goldset_size = len(goldset.entities) if goldset else 0
     for st in states:
         elos = list(st.elos.values())
+        hit_names = sorted(st.gold_hits)
+        hit_detail = {
+            entity: [
+                {"alias": r.matched_alias, "hyp_id": r.hypothesis_id, "field": r.field}
+                for r in records
+            ]
+            for entity, records in st.gold_hits.items()
+        }
         rows.append({
             "candidate_id": st.candidate_id,
             "label": st.spec.label,
             "provider": st.spec.provider,
             "model": st.spec.model,
+            "mode": st.spec.mode,
             "n_hypotheses": len(st.hypotheses),
             "wins": st.wins,
             "losses": st.losses,
@@ -651,14 +913,31 @@ def _build_summary(
             "cost_usd": round(st.cost_usd, 4),
             "mean_latency_ms": (sum(st.latencies_ms) // len(st.latencies_ms))
                 if st.latencies_ms else None,
+            "gold_hits": len(hit_names),
+            "gold_recall": (len(hit_names) / goldset_size) if goldset_size else None,
+            "gold_hit_names": hit_names,
+            "gold_hit_detail": hit_detail,
             "error": st.error,
         })
-    # Sort: highest mean_elo first
-    rows.sort(key=lambda r: (r["mean_elo"] is None, -(r["mean_elo"] or 0.0)))
+    # Primary sort: gold recall (more hits = better) when a gold set was
+    # configured; otherwise mean Elo. Secondary sort always mean Elo.
+    if goldset_size:
+        rows.sort(key=lambda r: (
+            -(r.get("gold_hits") or 0),
+            r["mean_elo"] is None,
+            -(r["mean_elo"] or 0.0),
+        ))
+    else:
+        rows.sort(key=lambda r: (r["mean_elo"] is None, -(r["mean_elo"] or 0.0)))
     return {
         "bench_id": bench_id_,
         "goal": goal,
         "judge": f"{judge_provider}:{judge_model}",
         "n_matches": n_matches,
+        "goldset": {
+            "label": goldset.label,
+            "description": goldset.description,
+            "entities": [e.name for e in goldset.entities],
+        } if goldset else None,
         "candidates": rows,
     }
