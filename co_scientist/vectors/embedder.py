@@ -156,6 +156,18 @@ class HashEmbedder:
         return _l2_normalize(arr)
 
 
+# Once-per-process flags so the fallback warning doesn't fire on every
+# pair-selection (make_embedder is called inside the ranking loop and was
+# producing ~200 identical log lines per session).
+_FALLBACK_WARNED: set[str] = set()
+
+
+def _warn_once(key: str) -> None:
+    if key not in _FALLBACK_WARNED:
+        _FALLBACK_WARNED.add(key)
+        _log.warning(key)
+
+
 def make_embedder(cfg: Config) -> Embedder:
     """Construct an embedder honoring `cfg.embeddings.provider`.
 
@@ -169,15 +181,20 @@ def make_embedder(cfg: Config) -> Embedder:
         if cfg.secrets.VOYAGE_API_KEY or os.environ.get("VOYAGE_API_KEY"):
             return VoyageEmbedder(cfg)
         if cfg.secrets.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY"):
-            _log.warning("voyage_key_missing_using_openai_embeddings")
+            _warn_once("voyage_key_missing_using_openai_embeddings")
             return OpenAIEmbedder(cfg)
-        _log.warning("no_embedding_key_using_hash_fallback")
+        _warn_once("no_embedding_key_using_hash_fallback")
         return HashEmbedder(cfg)
     if provider == "openai":
         if cfg.secrets.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY"):
             return OpenAIEmbedder(cfg)
-        _log.warning("openai_key_missing_using_hash_fallback")
+        _warn_once("openai_key_missing_using_hash_fallback")
         return HashEmbedder(cfg)
     if provider == "hash":
         return HashEmbedder(cfg)
     raise ValueError(f"unknown embeddings provider: {provider}")
+
+
+def _reset_fallback_warned_for_tests() -> None:
+    """Test helper: clear the once-per-process warn cache."""
+    _FALLBACK_WARNED.clear()

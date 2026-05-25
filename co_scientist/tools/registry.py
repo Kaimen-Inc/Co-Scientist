@@ -50,13 +50,22 @@ class ToolRegistry:
     def discover(self) -> ToolRegistry:
         # Built-ins
         for t in (
-            WebSearchTool(self._cfg),
             WebFetchTool(self._cfg),
             PubmedSearchTool(self._cfg),
             ArxivSearchTool(),
             EuropePMCSearchTool(),
         ):
             self._register(t)
+        # web_search only registers if a backing search API key is set.
+        # Otherwise the model would see a tool it can't actually use and
+        # smaller models tend to abort the task instead of falling back to
+        # PubMed / arxiv / Europe PMC.
+        import os
+        if (
+            self._cfg.secrets.TAVILY_API_KEY or os.environ.get("TAVILY_API_KEY")
+            or self._cfg.secrets.BRAVE_API_KEY or os.environ.get("BRAVE_API_KEY")
+        ):
+            self._register(WebSearchTool(self._cfg))
         # Science-skills
         for meta in discover_skills(self._cfg):
             self._register(ScienceSkillTool(self._cfg, meta))

@@ -121,3 +121,29 @@ async def test_make_embedder_prefers_openai_when_voyage_missing_but_openai_set()
     cfg.secrets.OPENAI_API_KEY = "sk-fake"
     emb = make_embedder(cfg)
     assert isinstance(emb, OpenAIEmbedder)
+
+
+def test_fallback_warning_emits_once_per_process() -> None:
+    """Regression: ranking calls make_embedder() inside the pair-selection
+    loop (potentially hundreds of times per session). The fallback warning
+    must emit exactly once per process, not once per call.
+
+    We probe the internal `_FALLBACK_WARNED` set rather than caplog because
+    the project uses structlog, which doesn't always route through pytest's
+    logging capture. The set is the source of truth for the once-per-process
+    contract.
+    """
+    from co_scientist.config import Config
+    from co_scientist.vectors import embedder as emb_mod
+
+    emb_mod._reset_fallback_warned_for_tests()
+    cfg = Config()
+    cfg.embeddings.provider = "voyage"
+    cfg.secrets.VOYAGE_API_KEY = ""
+    cfg.secrets.OPENAI_API_KEY = ""
+
+    for _ in range(50):
+        emb_mod.make_embedder(cfg)
+
+    # Exactly one warning marker recorded; subsequent calls hit the cache.
+    assert {"no_embedding_key_using_hash_fallback"} == emb_mod._FALLBACK_WARNED

@@ -404,6 +404,93 @@ def eval_cmd(
     console.print_json(data=result)
 
 
+@app.command("bench")
+def bench_cmd(
+    ctx: typer.Context,
+    goal: str = typer.Argument(..., help="Research goal."),
+    candidate: list[str] = typer.Option(
+        ..., "--candidate", "-c",
+        help=(
+            "Repeat: label=provider:model. e.g. "
+            "'gemini-flash=openrouter:google/gemini-3-flash-preview'"
+        ),
+    ),
+    n: int = typer.Option(2, "--n", help="Hypotheses per candidate."),
+    matches: int = typer.Option(2, "--matches", help="Tournament matches per pair."),
+    judge: str = typer.Option(
+        "anthropic:claude-sonnet-4-6", "--judge",
+        help="Judge as provider:model. Fixed across all matches.",
+    ),
+    budget_per_candidate: float = typer.Option(
+        2.0, "--budget-per-candidate", help="USD cap per candidate."
+    ),
+    judge_budget: float = typer.Option(
+        5.0, "--judge-budget", help="USD cap for all judge calls combined."
+    ),
+) -> None:
+    """Compare N models on the same goal via a cross-Elo tournament.
+
+    Example:
+      co-scientist bench "Identify hypotheses about X" \\
+        -c gemini-flash=openrouter:google/gemini-3-flash-preview \\
+        -c gpt5=openai:gpt-5 \\
+        -c opus=anthropic:claude-opus-4-7 \\
+        --judge anthropic:claude-sonnet-4-6
+    """
+    cfg, _ = ctx.obj
+    from .bench import BenchCandidate, run_bench
+
+    candidates: list[BenchCandidate] = []
+    for entry in candidate:
+        if "=" not in entry or ":" not in entry.split("=", 1)[1]:
+            console.print(
+                f"[red]--candidate must look like label=provider:model, got {entry!r}[/red]"
+            )
+            raise typer.Exit(2)
+        label, rest = entry.split("=", 1)
+        provider, model = rest.split(":", 1)
+        candidates.append(BenchCandidate(label=label, provider=provider, model=model))
+
+    if ":" not in judge:
+        console.print(f"[red]--judge must look like provider:model, got {judge!r}[/red]")
+        raise typer.Exit(2)
+    judge_provider, judge_model = judge.split(":", 1)
+
+    outcome = asyncio.run(
+        run_bench(
+            cfg, goal=goal, candidates=candidates,
+            n_hyps_per_candidate=n,
+            matches_per_pair=matches,
+            judge_provider=judge_provider, judge_model=judge_model,
+            per_candidate_budget_usd=budget_per_candidate,
+            judge_budget_usd=judge_budget,
+        )
+    )
+
+    tbl = Table(title=f"Bench {outcome.bench_id} — {outcome.matches_played} matches")
+    tbl.add_column("rank", justify="right")
+    tbl.add_column("label", style="bold")
+    tbl.add_column("provider")
+    tbl.add_column("model")
+    tbl.add_column("n_hyps", justify="right")
+    tbl.add_column("W-L", justify="right")
+    tbl.add_column("mean_elo", justify="right")
+    tbl.add_column("$ spent", justify="right")
+    tbl.add_column("p50_ms", justify="right")
+    for i, row in enumerate(outcome.candidates, 1):
+        tbl.add_row(
+            str(i), row["label"], row["provider"], row["model"],
+            str(row["n_hypotheses"]),
+            f"{row['wins']}-{row['losses']}",
+            f"{row['mean_elo']:.0f}" if row["mean_elo"] is not None else "—",
+            f"{row['cost_usd']:.4f}",
+            str(row["mean_latency_ms"] or "—"),
+        )
+    console.print(tbl)
+    console.print(f"[dim]Total cost: ${outcome.total_cost_usd:.4f}[/dim]")
+    console.print(f"[dim]Artifact: {outcome.artifact_path}[/dim]")
+
+
 @tools_app.command("list")
 def tools_list(ctx: typer.Context) -> None:
     """List registered tools (builtins + any discovered science-skills)."""

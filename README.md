@@ -13,9 +13,60 @@ The system takes a natural-language research goal, runs six specialized LLM agen
 
 A **Supervisor** schedules agents via a durable task queue (SQLite-backed) with bounded concurrency. The full design is in [`/Users/kuan-linhuang/.claude/plans/based-on-these-txt-unified-pearl.md`](../../.claude/plans/based-on-these-txt-unified-pearl.md).
 
+## Architecture
+
+```
+                       co-scientist run "<goal>"
+                                  │
+                                  ▼
+            ┌──────────────────────────────────────┐
+            │            Supervisor                │  durable task queue (SQLite)
+            │  • parse_goal → ResearchPlan         │  bounded concurrency
+            │  • enqueue initial Generation tasks  │  lease + dead-letter + resume
+            │  • main loop: claim → run → follow-up│  termination: BUDGET / WALL_CLOCK
+            │  • _decide_next_steps when idle      │              / ELO_STABLE / IDLE / EXTERNAL
+            │  • _finalize: meta-review final      │
+            └──────────────────────────────────────┘
+                                  │  tasks
+            ┌─────────────────────┼─────────────────────────────┐
+            ▼                     ▼                             ▼
+   ┌──────────────┐      ┌──────────────┐              ┌──────────────┐
+   │  Generation  │      │  Reflection  │              │   Ranking    │
+   │  literature  │      │  full / verif│              │ pairwise vs  │
+   │  +tool loop  │─►hyp│  +URL check  │─►review─►rank│   debate     │──►Elo
+   └──────────────┘      └──────────────┘              └──────────────┘
+            ▲                                                   │
+            │                                                   ▼
+   ┌──────────────┐      ┌──────────────┐              ┌──────────────┐
+   │  Evolution   │◄─────│ Meta-review  │              │  Proximity   │
+   │ combine /    │ feed │ system fdbk  │              │ FAISS recluster│
+   │ simplify /   │ back │ final overview│             │ dedup + close│
+   │ out_of_box   │      └──────────────┘              │ Elo pairings │
+   └──────────────┘                                    └──────────────┘
+            │
+            ▼
+       new hypotheses re-enter the cycle
+
+
+  Shared infrastructure
+  ─────────────────────
+  • LLMProvider  ─ anthropic / openai / openrouter / gemini / groq /
+                   together / mistral / ollama / openai_compatible
+  • ToolRegistry ─ web_fetch + pubmed/arxiv/europe_pmc;
+                   web_search auto-registered iff TAVILY/BRAVE key set;
+                   science-skills via SKILL.md frontmatter
+  • TokenBudget  ─ per-agent shares + global cap; reservation released on retry
+  • EventBus     ─ in-memory fan-out to SSE for the live web UI
+  • FaissStore   ─ IndexFlatIP, asyncio-locked, atomic save/load;
+                   Voyage → OpenAI → hash-fallback embedder chain
+  • SQLite       ─ 15 tables incl. sessions / hypotheses / reviews / tasks /
+                   tournament_matches / transcripts / events / bench_*
+                   (WAL, busy_timeout, schema_migrations idempotent runner)
+```
+
 ## Status
 
-**Through M9 — full system shipped.** 88 unit tests passing, ruff clean.
+**Through M9 — full system shipped. Multi-provider + bench landed.** 182 unit tests passing, ruff clean.
 
 - **M0 — Skeleton.** Package layout, pydantic-settings config, SQLite schema + migrations (12 tables incl. `spans`/`events`/`elo_journal`), ULID + deterministic-hash IDs, structlog JSONL logging.
 - **M1 — Storage, vectors, tools.** 10 repos; Voyage+OpenAI embedders; FAISS `IndexFlatIP` per-session store; built-in tools (`web_search`, `web_fetch`, `pubmed_search`, `arxiv_search`, `europe_pmc_search`); science-skills bridge that parses `SKILL.md` + shells out to scripts with a path-traversal guard.
@@ -125,24 +176,74 @@ co-scientist list
 
 Layered: [`config/default.toml`](config/default.toml) → `~/.co-scientist/config.toml` → `./co-scientist.toml` → `--config <path>`. Secrets come from environment only (see [`.env.example`](.env.example)).
 
+## Bench: compare models head-to-head
+
+`co-scientist bench` runs the same goal under N different `(provider, model)`
+configurations and ranks them via a single shared Elo tournament. Each
+candidate independently generates hypotheses; then every candidate-pair
+plays `--matches` head-to-head debates, judged by ONE fixed judge model
+(picked separately so no candidate scores its own work).
+
+```bash
+co-scientist bench "Identify hypotheses about microbiome-driven inflammation" \
+  -c flash3=openrouter:google/gemini-3-flash-preview \
+  -c flash25=openrouter:google/gemini-2.5-flash \
+  -c gpt4o-mini=openrouter:openai/gpt-4o-mini \
+  --n 1 --matches 2 \
+  --judge openrouter:openai/gpt-4o \
+  --budget-per-candidate 0.50 --judge-budget 1.0
+```
+
+Output (real run):
+
+```
+Bench bnc_01KSG6GM23ERB68V6BCF9XBS2B — 6 matches
+┏━━━━━━┳────────────┬─────────────────────────────────┬────────┬─────┬─────────┬────────┬────────┓
+┃ rank ┃ label      ┆ provider:model                  ┆ n_hyps ┆ W-L ┆ mean Elo┆ $spent ┆ p50 ms ┃
+┡━━━━━━╇────────────┼─────────────────────────────────┼────────┼─────┼─────────┼────────┼────────┩
+│  1   │ flash3     │ openrouter:google/gemini-3-...  │   1    │ 3-1 │  1232   │ 0.0090 │  9764  │
+│  2   │ flash25    │ openrouter:google/gemini-2.5-...│   1    │ 3-1 │  1227   │ 0.0098 │ 16742  │
+│  3   │ gpt4o-mini │ openrouter:openai/gpt-4o-mini   │   1    │ 0-4 │  1142   │ 0.0050 │ 19137  │
+└──────┴────────────┴─────────────────────────────────┴────────┴─────┴─────────┴────────┴────────┘
+Total cost: $0.0238
+```
+
+Mechanics:
+
+- **Generation runs in parallel** per candidate under a deep-copied
+  Config (`cfg.llm.provider`, `cfg.models.*`, thinking budgets zeroed
+  for non-Anthropic).
+- **Round-robin pairings**: every pair plays `--matches` head-to-heads
+  (one random hypothesis from each side per match).
+- **Structured verdict** via a forced `record_verdict` function call —
+  no fragile `better idea: <N>` text parsing across providers.
+- **Per-candidate stats** persisted to `bench_candidates`: hyp count,
+  W-L, mean / top Elo, $ spent, p50 latency, last error.
+- **Each match persisted** to `bench_matches` with both sides'
+  hypothesis text, pre/post Elo, judge rationale, cost & latency.
+- Bench runs are **isolated from regular sessions** — they don't write
+  to `tournament_matches` or affect any session's leaderboard.
+
 ## Repository layout
 
 ```
 co_scientist/
   agents/       # supervisor + 6 specialized agents (M3+)
-  llm/          # Anthropic client wrapper, tool loop, budgets, routing (M2)
-  storage/      # SQLite schema, db connection, repos (M0/M1)
-  tools/        # tool registry; web/search, science-skills, code exec (M1)
-  vectors/      # embeddings + FAISS index (M1)
-  orchestrator/ # task queue, worker pool, termination, event bus (M5)
-  safety/       # injection quoting, classifier, citation verifier (M8)
-  obs/          # spans, metrics (M8)
-  web/          # FastAPI + htmx + SSE UI (M7)
-  evals/        # per-agent + e2e + regression evals (M8)
-  tests/        # unit, fixtures, smoke
+  bench/        # cross-model bench runner (compare via Elo tournament)
+  llm/          # provider abstraction (anthropic/openai/openrouter/gemini/...),
+                # tool loop, budgets, routing, retry
+  storage/      # SQLite schema + migrations, db connection, 15 repos
+  tools/        # tool registry; web/search, science-skills, code exec
+  vectors/      # embeddings (Voyage/OpenAI/hash-fallback) + FAISS index
+  orchestrator/ # task queue, worker pool, termination, event bus
+  safety/       # injection quoting, classifier, citation verifier
+  obs/          # spans, metrics
+  web/          # FastAPI + htmx + SSE UI + sanitized markdown renderer
+  evals/        # per-agent + e2e + regression evals
+  tests/        # 180+ unit tests + fixtures + smoke
 config/
   default.toml
-  prompts/      # Jinja2 templates per agent.mode (from reference/9)
+  prompts/      # Jinja2 templates per agent.mode
 reference/      # input materials (pseudocode, prompts, diagrams)
 data/           # gitignored; runtime artifacts
 vendor/         # gitignored; pinned clone of google-deepmind/science-skills

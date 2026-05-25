@@ -10,12 +10,29 @@ from co_scientist.tools.science_skills import discover_skills, parse_skill_md
 
 
 def test_registry_discovers_builtins(tmp_cfg) -> None:
+    """web_search needs a TAVILY/BRAVE key; the others are always available."""
+    tmp_cfg.secrets.TAVILY_API_KEY = "sk-fake"
     reg = ToolRegistry(tmp_cfg).discover()
     names = {t.name for t in reg.all()}
     assert {"web_search", "web_fetch", "pubmed_search", "arxiv_search", "europe_pmc_search"} <= names
 
 
+def test_web_search_skipped_when_no_search_api_key(tmp_cfg) -> None:
+    """Without a Tavily/Brave key the model would only see a tool that returns
+    errors; small models tend to abort instead of falling back to PubMed.
+    Auto-skip the registration to remove that footgun."""
+    tmp_cfg.secrets.TAVILY_API_KEY = ""
+    tmp_cfg.secrets.BRAVE_API_KEY = ""
+    reg = ToolRegistry(tmp_cfg).discover()
+    names = {t.name for t in reg.all()}
+    assert "web_search" not in names
+    # Other literature tools still available.
+    assert "pubmed_search" in names
+    assert "europe_pmc_search" in names
+
+
 def test_agent_allowlist_resolution(tmp_cfg) -> None:
+    tmp_cfg.secrets.TAVILY_API_KEY = "sk-fake"
     reg = ToolRegistry(tmp_cfg).discover()
     assert len(reg.tools_for("ranking")) == 0
     assert len(reg.tools_for("proximity")) == 0
