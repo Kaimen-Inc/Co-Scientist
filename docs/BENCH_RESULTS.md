@@ -21,28 +21,26 @@ _Auto-generated from `data/co_scientist.db` by_ _`python scripts/build_bench_rep
 
 From the two AML `*-vs-raw` benches, where each model runs the same goal twice: **direct** (a single LM call, no harness) and **pipeline** (the full Generation harness — literature tools + tool loop + dedup). Within each bench both modes share one Elo pool, so the direct→pipeline change is a clean read on what the harness does to a given model.
 
-### 1. Does the harness help? It depends on the model.
+### 1. The harness helps Anthropic + OpenAI, hurts Google
 
-Run with vs. without the harness, the effect on tournament standing splits cleanly: Claude and o1 gain a lot, GPT-5 is flat, both Gemini models regress.
+Restricting to the **six models that produced a hypothesis in both modes** (two are excluded — `gemini-2-flash-thinking[raw]` hit a transient HTTP 429 and `gemini-2-pro[pipe]` returned an empty completion; both are infra/flaky non-finishes, not capability gaps), the direct→pipeline Elo change groups cleanly by **provider**:
 
-| model | direct (no harness) | pipeline (harness) | Δ Elo | effect |
+| provider | model | direct (no harness) | pipeline (harness) | Δ Elo |
 | --- | --- | --- | --- | --- |
-| claude-haiku-4.5 | 1-9 (1120) | 10-0 (1300) | **+180** | strong lift |
-| claude-opus-4.7 | 10-4 (1270) | 14-0 (1367) | **+97** | strong lift |
-| openai-o1 | 4-6 (1178) | 6-4 (1221) | +43 | lift |
-| gpt-5 | 5-9 (1146) | 6-8 (1172) | +25 | ~flat |
-| gemini-3-flash | 2-12 (1110) | 0-14 (1074) | −37 | regression |
-| gemini-3-pro | 12-2 (1275) | 7-7 (1186) | −89 | regression |
+| Anthropic | claude-haiku-4.5 | 1-9 (1120) | 10-0 (1300) | **+180** |
+| Anthropic | claude-opus-4.7 | 10-4 (1270) | 14-0 (1367) | **+97** |
+| OpenAI | openai-o1 | 4-6 (1178) | 6-4 (1221) | +43 |
+| OpenAI | gpt-5 | 5-9 (1146) | 6-8 (1172) | +26 |
+| Google | gemini-3-flash | 2-12 (1110) | 0-14 (1074) | −36 |
+| Google | gemini-3-pro | 12-2 (1275) | 7-7 (1186) | −89 |
 
 _(Δ Elo is within-bench: haiku/o1 in the paper-baseline pool, opus/gpt-5/gemini-3 in the frontier pool — compare each model to itself, not across rows.)_
 
-Claude and o1 turn the literature tools into tournament-winning hypotheses (haiku and opus go from losing records raw to near-perfect in pipeline). Gemini scores well raw but the tool loop drags its rated hypothesis down. The harness is not a flat win — its value tracks the model.
+**Both Anthropic models and both OpenAI models improve with the harness; both Google models regress.** The driver is the model family, not raw strength: within a provider, strength doesn't predict the delta — Anthropic's *weakest* model (haiku) gained the most (+180), while Google's *strongest* (gemini-3-pro) regressed the most (−89). Claude and o1 turn the literature tools into tournament-winning hypotheses; Gemini scores well raw but the tool loop drags its rated hypothesis down. (Caveat: two models per provider — a suggestive split, not a proof.)
 
-### 2. The harness changes quality, not whether a model finishes
+The harness affects *quality, not whether a model finishes*: direct mode (one forced call) is the easy path, and the only two empty candidates failed for infra/flaky reasons above — the single pipeline miss is the harder path, not the direct one.
 
-A natural question: do some models only complete *with* the harness? No — it's the opposite. **Direct mode (no harness) is the easy path** — one forced `record_hypothesis` call — and every direct candidate that wasn't rate-limited produced a hypothesis. Of the 16 candidates, only two produced nothing: `gemini-2-flash-thinking[raw]` (a transient HTTP 429 from the provider) and `gemini-2-pro[pipe]` (an empty completion on the forced final call). The single *pipeline* miss is the harder-to-finish path, not the direct one. So the harness doesn't decide whether a model can produce a hypothesis — it decides how good that hypothesis is.
-
-### 3. Consistency: models converge on mechanisms, not specific drugs
+### 2. Consistency: models converge on mechanisms, not specific drugs
 
 Across all 37 AML hypotheses recorded on this codebase, agreement is at the **mechanism** level, not the compound level:
 
