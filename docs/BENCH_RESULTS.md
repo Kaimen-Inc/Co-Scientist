@@ -1,6 +1,6 @@
 # Bench results
 
-Live results from every cross-model bench run on this codebase. See [`../README.md`](../README.md) for what the bench is and how to run it.
+Pilot results from every cross-model bench run on this codebase. See [`../README.md`](../README.md) for what the bench is and how to run it.
 
 _Auto-generated from `data/co_scientist.db` by_ _`python scripts/build_bench_report.py`._ _Re-run after any new `co-scientist bench` to refresh._
 
@@ -44,7 +44,7 @@ Haiku's *raw* record alone flipped 1-9 → 10-2 across the two runs — with one
 | gemini-3-flash | −36 |
 | gemini-3-pro | −89 |
 
-Within Google alone the 2.5 models gain (+172, +47) and the 3.x models lose (−36, −89) — so there is no clean "provider" or "stronger-model" story; an earlier draft that claimed one was reading noise. **The only repeatable signal is openai-o1** (pipeline modestly ahead in both runs). A real per-model verdict needs many more seeds (higher `--n`, more matches) to average out the single-hypothesis variance.
+Within Google alone the 2.5 models gain (+172, +47) and the 3.x models lose (−36, −89) — so there is no clean "provider" or "stronger-model" story; an earlier draft that claimed one was reading noise. Openai-o1 had pipeline modestly ahead in both runs. A real per-model verdict needs many more seeds (higher `--n`, more matches) to average out the single-hypothesis variance.
 
 ### 2. Consistency: models converge on mechanisms, not specific drugs
 
@@ -59,12 +59,7 @@ Across all 48 AML hypotheses recorded on this codebase, agreement is at the **me
 | fatty-acid oxidation | 5 |
 | ferroptosis | 3 |
 
-At the **drug** level it's a long tail of one-offs. The only compounds proposed more than once are **Itraconazole** (×5, as an OXPHOS inhibitor) and **Auranofin** (×2, thioredoxin-reductase). **Venetoclax** appears ×6 but as the resistance/combo context, not the novel candidate. Tellingly, all three recurrent names already have prior AML evidence — models default to the familiar, which is exactly what the strict no-prior-evidence prompt forbids (no hypothesis across any of these benches hit the paper's gold-set picks).
-
-### Practical implications
-
-- **Don't read a single bench's Elo as a model verdict.** The   pipeline reliably produces hypotheses, but at `--n 1` the   direct-vs-pipeline delta is within run-to-run noise. Measuring   whether the harness helps a given model needs many seeds (higher   `--n`, more `--matches`).
-- **Recurrence is a weak novelty signal here.** The most-repeated   picks are the least novel. Surfacing genuinely-novel candidates   needs more breadth and iterative refinement, not a single   Generation call.
+At the **drug** level it's a long tail of one-offs. The only compounds proposed more than once are **Itraconazole** (×5, as an OXPHOS inhibitor, has PhII in combo https://www.sciencedirect.com/science/article/pii/S0145212623006380) and **Auranofin** (×2, thioredoxin-reductase, potentially novel). **Venetoclax** (FDA-Approved Frontline Standard of Care) appears ×6 but as the resistance/combo context, not the novel candidate. No hypothesis across any of these benches hit the paper's original pick after many more generation and oncologist selection. 
 
 
 ## Index of recorded benches

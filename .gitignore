@@ -33,6 +33,9 @@ dist/
 .vscode/
 *.swp
 
+# Local-only docs (not committed)
+docs/REIMPL_VS_PAPER.md
+
 # Tests / tooling
 .pytest_cache/
 .mypy_cache/
