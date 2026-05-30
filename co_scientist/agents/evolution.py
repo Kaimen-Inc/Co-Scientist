@@ -184,6 +184,7 @@ class EvolutionAgent(BaseAgent):
                 max_iters=self.deps.cfg.tool_loop.evolution_max_iters,
                 parallel_cap=self.deps.cfg.tool_loop.parallel_cap,
                 tool_timeout_s=self.deps.cfg.tool_loop.tool_timeout_seconds,
+                force_terminal_tool="record_hypothesis",
             )
         except ToolLoopExhausted as e:
             log.warning("evolution_tool_loop_exhausted", err=str(e))

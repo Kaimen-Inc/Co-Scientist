@@ -57,7 +57,7 @@ def session_root(cfg: Config, session_id: str) -> Path:
 def _write(p: Path, payload: Any) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, default=str, ensure_ascii=False))
+    tmp.write_text(json.dumps(payload, indent=2, default=str, ensure_ascii=False), encoding="utf-8")
     tmp.replace(p)  # atomic on POSIX
 
 
@@ -96,7 +96,7 @@ async def write_text(cfg: Config, session_id: str, kind: str, id_: str, suffix: 
     def _do() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(body)
+        tmp.write_text(body, encoding="utf-8")
         tmp.replace(p)
 
     await asyncio.to_thread(_do)

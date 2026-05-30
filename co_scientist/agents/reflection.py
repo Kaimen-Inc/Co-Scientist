@@ -90,6 +90,7 @@ class ReflectionAgent(BaseAgent):
                 max_iters=self.deps.cfg.tool_loop.reflection_max_iters,
                 parallel_cap=self.deps.cfg.tool_loop.parallel_cap,
                 tool_timeout_s=self.deps.cfg.tool_loop.tool_timeout_seconds,
+                force_terminal_tool="record_review",
             )
         except ToolLoopExhausted as e:
             raise RuntimeError(f"reflection exhausted tool loop: {e}") from e
