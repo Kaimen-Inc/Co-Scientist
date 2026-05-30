@@ -112,6 +112,32 @@ async def run_tool_loop(
         stop = getattr(resp.raw, "stop_reason", None)
 
         if stop != "tool_use":
+            # If the model returned a text response early (before calling the
+            # terminal tool), force one more call so the result is captured.
+            # This handles OpenAI/Gemini models that respond in text instead of
+            # committing via the recording tool — Claude reliably doesn't need this.
+            if force_terminal_tool and iterations < max_iters:
+                already_called = any(
+                    e.get("name") == force_terminal_tool for e in tool_calls_log
+                )
+                if not already_called:
+                    forced_spec = AgentCallSpec(
+                        route=current_spec.route,
+                        system_blocks=current_spec.system_blocks,
+                        user_blocks=current_spec.user_blocks,
+                        tools=current_spec.tools,
+                        tool_choice={"type": "tool", "name": force_terminal_tool},
+                        max_output_tokens=current_spec.max_output_tokens,
+                        stop_sequences=current_spec.stop_sequences,
+                        extra_messages=current_spec.extra_messages,
+                    )
+                    resp = await client.call(forced_spec, ctx)
+                    return ToolLoopResult(
+                        response=resp,
+                        iterations=iterations + 1,
+                        tool_calls=tool_calls_log,
+                        seen_urls=seen_urls,
+                    )
             return ToolLoopResult(
                 response=resp,
                 iterations=iterations,
