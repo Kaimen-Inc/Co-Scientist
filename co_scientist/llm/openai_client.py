@@ -309,7 +309,7 @@ def _build_openai_request(spec: AgentCallSpec) -> dict[str, Any]:
     request: dict[str, Any] = {
         "model": spec.route.model,
         "messages": messages,
-        "max_tokens": spec.max_output_tokens,
+        "max_completion_tokens": spec.max_output_tokens,
     }
     if spec.stop_sequences:
         request["stop"] = spec.stop_sequences
@@ -441,7 +441,7 @@ _STOP_REASON_MAP = {
     "stop": "end_turn",
     "tool_calls": "tool_use",
     "function_call": "tool_use",  # legacy
-    "length": "max_tokens",
+    "length": "max_completion_tokens",
     "content_filter": "refusal",
 }
 
