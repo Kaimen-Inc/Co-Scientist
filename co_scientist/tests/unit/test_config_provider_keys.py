@@ -15,6 +15,7 @@ def _cfg(provider: str) -> Config:
     cfg.llm.provider = provider
     cfg.secrets.ANTHROPIC_API_KEY = ""
     cfg.secrets.OPENAI_API_KEY = ""
+    cfg.secrets.ATLASCLOUD_API_KEY = ""
     cfg.secrets.OPENROUTER_API_KEY = ""
     cfg.secrets.GEMINI_API_KEY = ""
     cfg.secrets.GROQ_API_KEY = ""
@@ -35,6 +36,14 @@ def test_openrouter_provider_uses_openrouter_key() -> None:
     assert not has_llm_key(cfg)
     cfg.secrets.OPENROUTER_API_KEY = "sk-or-fake"
     assert has_llm_key(cfg)
+
+
+def test_atlas_provider_uses_atlas_key() -> None:
+    cfg = _cfg("atlas")
+    assert not has_llm_key(cfg)
+    cfg.secrets.ATLASCLOUD_API_KEY = "atlas-fake"
+    assert has_llm_key(cfg)
+    assert provider_key_env(cfg) == "ATLASCLOUD_API_KEY"
 
 
 def test_openrouter_provider_accepts_openai_api_key_as_override() -> None:

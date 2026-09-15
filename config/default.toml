@@ -205,6 +205,9 @@ classifier_warn_categories = ["dual_use_bio"]
 #                  cache breakpoints and the Batch API. Set ANTHROPIC_API_KEY.
 #                  Models: "claude-opus-4-7", "claude-sonnet-4-6".
 #   "openai"     — OpenAI Chat Completions. Set OPENAI_API_KEY.
+#   "atlas"      — Atlas Cloud's OpenAI-compatible API. Set ATLASCLOUD_API_KEY.
+#                  Models use vendor-prefixed ids such as
+#                  "anthropic/claude-sonnet-4.6" or "openai/gpt-5.4".
 #   "gemini"     — Google Gemini via OpenAI-compat endpoint. Set
 #                  GEMINI_API_KEY. Models: "gemini-3-flash", "gemini-3-pro",
 #                  "gemini-2.5-pro".

@@ -317,9 +317,9 @@ class LLMCfg(BaseModel):
       endpoint. Set GEMINI_API_KEY. Thought signatures are preserved
       automatically. Optional semantic reasoning levels are configured under
       `llm.gemini`.
-    - "groq", "together", "mistral", "ollama" — convenience presets for
+    - "atlas", "groq", "together", "mistral", "ollama" — convenience presets for
       those endpoints; each reads its own API key env var
-      (GROQ_API_KEY, TOGETHER_API_KEY, MISTRAL_API_KEY).
+      (ATLASCLOUD_API_KEY, GROQ_API_KEY, TOGETHER_API_KEY, MISTRAL_API_KEY).
     - "openai_compatible" — same client as `openai` but allows
       `llm.openai.base_url` to point at any other OpenAI-compatible
       endpoint not yet covered by a preset.
@@ -357,6 +357,7 @@ class Secrets(BaseSettings):
 
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
+    ATLASCLOUD_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
@@ -463,6 +464,7 @@ _PROVIDER_ENV_VARS: dict[str, str] = {
     "anthropic":          "ANTHROPIC_API_KEY",
     "openai":             "OPENAI_API_KEY",
     "openai_compatible":  "OPENAI_API_KEY",
+    "atlas":              "ATLASCLOUD_API_KEY",
     "openrouter":         "OPENROUTER_API_KEY",
     "gemini":             "GEMINI_API_KEY",
     "google":             "GEMINI_API_KEY",
@@ -489,7 +491,7 @@ def has_llm_key(cfg: Config) -> bool:
         return True   # keyless provider
     # Explicit OPENAI_API_KEY is always honored (lets users repurpose presets).
     openai_compat_envs = {
-        "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY",
+        "OPENAI_API_KEY", "ATLASCLOUD_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY",
         "GROQ_API_KEY", "TOGETHER_API_KEY", "MISTRAL_API_KEY",
     }
     if env_var in openai_compat_envs and (
