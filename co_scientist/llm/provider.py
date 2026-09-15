@@ -10,8 +10,8 @@ Anthropic-Message-shaped (`.content` blocks, `.stop_reason`, `.usage`) — see
 breakpoints and a Batch API.
 
 **Metered API, OpenAI-shaped** (`openai`, `openai_compatible`, and the named
-presets `openrouter` / `gemini` / `google` / `groq` / `together` / `mistral` /
-`ollama`) — translates to `openai.chat.completions.create` against the
+presets `atlas` / `openrouter` / `gemini` / `google` / `groq` / `together` /
+`mistral` / `ollama`) — translates to `openai.chat.completions.create` against the
 appropriate base_url.
 
 **Subscription CLI** (`claude_cli`, `codex_cli`) — drives a locally installed
@@ -72,6 +72,7 @@ API_PROVIDERS = frozenset({
     "anthropic",
     "openai",
     "openai_compatible",
+    "atlas",          # convenience preset
     "openrouter",
     "gemini",
     "google",         # alias for "gemini"
@@ -94,6 +95,11 @@ class BackendUnavailable(RuntimeError):
 # `default_headers` are extra HTTP headers passed to AsyncOpenAI for that
 # vendor's accounting / attribution conventions.
 OPENAI_COMPAT_PRESETS: dict[str, dict[str, str | dict[str, str] | None]] = {
+    "atlas": {
+        "base_url": "https://api.atlascloud.ai/v1",
+        "api_key_env": "ATLASCLOUD_API_KEY",
+        "default_headers_factory": None,
+    },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "api_key_env": "OPENROUTER_API_KEY",
@@ -335,6 +341,7 @@ def _check_cli_backend(cfg, name: str) -> BackendStatus:
 # every key leaves ids from the previous family in place. Nothing notices until
 # the first real model call, which 404s after a session has already started.
 _EXPECTS_VENDOR_PREFIX: dict[str, bool | None] = {
+    "atlas": True,
     "openrouter": True,
     "together": True,           # e.g. "meta-llama/Llama-3.3-70B-Instruct-Turbo"
     "openai_compatible": None,

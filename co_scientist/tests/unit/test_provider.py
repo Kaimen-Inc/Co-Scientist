@@ -39,6 +39,7 @@ def _route(model: str = "gpt-5", thinking: int = 0) -> ModelRoute:
 
 def test_known_providers_includes_presets() -> None:
     assert "anthropic" in KNOWN_PROVIDERS
+    assert "atlas" in KNOWN_PROVIDERS
     assert "openai" in KNOWN_PROVIDERS
     assert "openai_compatible" in KNOWN_PROVIDERS
     assert "openrouter" in KNOWN_PROVIDERS
@@ -132,6 +133,19 @@ def test_compat_mode_allows_empty_api_key() -> None:
 
 
 # ----------------------------- presets ----------------------------- #
+
+
+def test_provider_atlas_uses_compat_endpoint_and_key() -> None:
+    cfg = Config()
+    cfg.llm.provider = "atlas"
+    cfg.secrets.OPENAI_API_KEY = ""
+    cfg.secrets.ATLASCLOUD_API_KEY = "atlas-fake"
+    with patch("openai.AsyncOpenAI") as mock_sdk:
+        provider = get_provider(cfg, db=MagicMock(), budget=MagicMock())
+    kwargs = mock_sdk.call_args.kwargs
+    assert kwargs["base_url"] == "https://api.atlascloud.ai/v1"
+    assert kwargs["api_key"] == "atlas-fake"
+    assert provider._provider_name == "atlas"
 
 
 def test_provider_openrouter_uses_preset_base_url_and_key() -> None:

@@ -113,6 +113,7 @@ export OPENROUTER_API_KEY=...      # provider = "openrouter" (the default)
 # or, to talk to one vendor directly:
 export ANTHROPIC_API_KEY=...       # provider = "anthropic"
 export OPENAI_API_KEY=...          # provider = "openai"
+export ATLASCLOUD_API_KEY=...      # provider = "atlas"
 export GEMINI_API_KEY=...          # provider = "gemini"
 ```
 
@@ -168,7 +169,7 @@ Two families of backend serve the same agents, selected with `[llm] provider`:
 
 | Family | `provider` values | Billing | Needs |
 | --- | --- | --- | --- |
-| **Metered API** | `openrouter` *(default)*, `anthropic`, `openai`, `gemini`/`google`, `groq`, `together`, `mistral`, `ollama`, `openai_compatible` | per token | an API key |
+| **Metered API** | `openrouter` *(default)*, `anthropic`, `atlas`, `openai`, `gemini`/`google`, `groq`, `together`, `mistral`, `ollama`, `openai_compatible` | per token | an API key |
 | **Subscription CLI** | `claude_cli`, `codex_cli` | included in a subscription you already pay for | the CLI installed and signed in |
 
 They are fully interchangeable from the agents' point of view — the same six
@@ -185,7 +186,7 @@ Config is **deep-merged** over [`config/default.toml`](config/default.toml), who
 ```toml
 [llm]
 # Pick one. See the provider table below.
-provider = "openai"   # openrouter | anthropic | openai | gemini | google | groq | together | mistral | ollama | openai_compatible
+provider = "openai"   # openrouter | anthropic | atlas | openai | gemini | google | groq | together | mistral | ollama | openai_compatible
 
 [models]
 # Override ALL of these with model ids from your chosen provider.
@@ -209,6 +210,7 @@ Providers are listed alphabetically. `openrouter` is the default, but nothing el
 | provider              | Endpoint                                                | API-key env var         | Example models                                            |
 | --------------------- | ------------------------------------------------------- | ----------------------- | --------------------------------------------------------- |
 | `anthropic`           | api.anthropic.com                                       | `ANTHROPIC_API_KEY`     | `claude-opus-4-7`, `claude-sonnet-4-6`                    |
+| `atlas`               | api.atlascloud.ai/v1 (OpenAI-compat)                    | `ATLASCLOUD_API_KEY`    | `anthropic/claude-sonnet-4.6`, `openai/gpt-5.4`           |
 | `gemini` / `google`   | generativelanguage.googleapis.com (OpenAI-compat)       | `GEMINI_API_KEY`        | `gemini-3-pro`, `gemini-3-flash`, `gemini-2.5-pro`        |
 | `groq`                | api.groq.com                                            | `GROQ_API_KEY`          | `llama-3.3-70b-versatile`, `mixtral-8x7b-32768`           |
 | `mistral`             | api.mistral.ai                                          | `MISTRAL_API_KEY`       | `mistral-large-latest`, `codestral-latest`                |
@@ -218,7 +220,7 @@ Providers are listed alphabetically. `openrouter` is the default, but nothing el
 | `openrouter` *(default)* | openrouter.ai — 200+ models from every major vendor  | `OPENROUTER_API_KEY`    | `openai/gpt-5`, `google/gemini-2.5-pro`, `anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.3-70b-instruct` |
 | `together`            | api.together.xyz                                        | `TOGETHER_API_KEY`      | `meta-llama/Llama-3.3-70B-Instruct-Turbo`                 |
 
-> Key precedence: for every OpenAI-compatible preset (`openrouter`, `gemini`, `groq`, `together`, `mistral`, `ollama`), `OPENAI_API_KEY` is used **first** if it's set, and the provider-specific var above is only the fallback. So if you have a stray `OPENAI_API_KEY` in your environment it will be sent to the preset's endpoint (and rejected) — unset it, or set only the provider's own key, when using a preset.
+> Key precedence: for every OpenAI-compatible preset (`atlas`, `openrouter`, `gemini`, `groq`, `together`, `mistral`, `ollama`), `OPENAI_API_KEY` is used **first** if it's set, and the provider-specific var above is only the fallback. So if you have a stray `OPENAI_API_KEY` in your environment it will be sent to the preset's endpoint (and rejected) — unset it, or set only the provider's own key, when using a preset.
 
 #### Gemini thinking and tool calls
 
