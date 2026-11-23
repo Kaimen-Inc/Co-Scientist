@@ -14,12 +14,12 @@ presets `openrouter` / `gemini` / `google` / `groq` / `together` / `mistral` /
 `ollama`) — translates to `openai.chat.completions.create` against the
 appropriate base_url.
 
-**Subscription CLI** (`claude_cli`, `codex_cli`) — drives a locally installed
-agent harness (`claude -p`, `codex exec`) over its own OAuth login. No API key
-is involved, and any that are present in the environment are stripped from the
-subprocess so a call can never silently fall back to metered billing. These
-run their own agentic loop, so they set `runs_own_loop` and `tool_loop.py`
-reads their captured tool use rather than driving turns.
+**Subscription CLI** (`claude_cli`, `codex_cli`, `agy_cli`) — drives a locally
+installed agent harness (`claude -p`, `codex exec`, `agy`) over its own OAuth
+login. No API key is involved, and any that are present in the environment are
+stripped from the subprocess so a call can never silently fall back to metered
+billing. These run their own agentic loop, so they set `runs_own_loop` and
+`tool_loop.py` reads their captured tool use rather than driving turns.
 
 Provider-specific features:
 - cache_control: honored only on Anthropic. Stripped before sending elsewhere;
@@ -65,7 +65,7 @@ class LLMProvider(Protocol):
 
 
 # Backends that drive a local agent CLI on a subscription login.
-CLI_BACKENDS = frozenset({"claude_cli", "codex_cli"})
+CLI_BACKENDS = frozenset({"claude_cli", "codex_cli", "agy_cli"})
 
 # Backends that call a metered HTTP API with a key.
 API_PROVIDERS = frozenset({
@@ -185,6 +185,11 @@ def get_provider(
 
         return CodexCliProvider(cfg, db=db, budget=budget, retry_policy=retry_policy)
 
+    if name == "agy_cli":
+        from .cli_backend.agy import AgyCliProvider
+
+        return AgyCliProvider(cfg, db=db, budget=budget, retry_policy=retry_policy)
+
     if name == "anthropic":
         from .anthropic_client import AnthropicClient
 
@@ -292,6 +297,10 @@ def _check_cli_backend(cfg, name: str) -> BackendStatus:
         binary = cfg.llm.codex_cli.binary
         auth_cmd = [binary, "login", "status"]
         auth_marker = "logged in"
+    elif name == "agy_cli":
+        binary = cfg.llm.agy_cli.binary
+        auth_cmd = None
+        auth_marker = ""
     else:
         name = "claude_cli"
         binary = cfg.llm.claude_cli.binary
@@ -308,7 +317,9 @@ def _check_cli_backend(cfg, name: str) -> BackendStatus:
 
     version = _probe(subprocess, [path, "--version"])
 
-    if auth_cmd is not None:
+    if name == "agy_cli":
+        authenticated, detail = _probe_agy_auth(subprocess, path)
+    elif auth_cmd is not None:
         status_text = _probe(subprocess, [path, *auth_cmd[1:]]) or ""
         authenticated = auth_marker in status_text.lower()
         detail = status_text or "no auth status reported"
@@ -347,6 +358,7 @@ _EXPECTS_VENDOR_PREFIX: dict[str, bool | None] = {
     "ollama": False,
     "claude_cli": False,
     "codex_cli": False,
+    "agy_cli": False,
 }
 
 
@@ -402,6 +414,34 @@ def _claude_signed_in() -> bool:
         except (OSError, json.JSONDecodeError, AttributeError):
             pass
     return (Path.home() / ".claude" / ".credentials.json").exists()
+
+
+def _probe_agy_auth(subprocess_mod, path: str) -> tuple[bool, str]:
+    """Verify Antigravity CLI subscription login via `agy models` (zero inference)."""
+    try:
+        out = subprocess_mod.run(
+            [path, "models"], capture_output=True, text=True, timeout=20, check=False,
+        )
+    except (OSError, ValueError, subprocess_mod.SubprocessError) as e:
+        return False, f"failed to probe `agy models`: {e}"
+
+    # Strip spinner carriage-return frames from stdout before counting slugs.
+    models: list[str] = []
+    for raw_line in (out.stdout or "").splitlines():
+        line = raw_line.rsplit("\r", 1)[-1].strip()
+        if not line or line.lower().startswith("fetching"):
+            continue
+        slug = line.split()[0]
+        if slug:
+            models.append(slug)
+
+    if out.returncode == 0 and models:
+        return True, f"signed in with Antigravity subscription ({len(models)} models available)"
+
+    err = (out.stderr or out.stdout or "").strip()
+    if err:
+        return False, f"not signed in ({err[:200]}) — run `agy` once and complete the login."
+    return False, "not signed in — run `agy` once and complete the login."
 
 
 def _probe(subprocess_mod, argv: list[str]) -> str | None:

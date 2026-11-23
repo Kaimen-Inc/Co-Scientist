@@ -76,7 +76,7 @@ This is an independent re-implementation in Python on top of pluggable LLM provi
   ─────────────────────
   • LLMProvider  ─ metered API (anthropic / openai / any OpenAI-compatible)
                    or subscription CLI (claude_cli `claude -p`,
-                   codex_cli `codex exec`) over OAuth, no key
+                   codex_cli `codex exec`, agy_cli `agy`) over OAuth, no key
   • ToolRegistry ─ web_fetch + pubmed_search / arxiv_search / europe_pmc_search;
                    web_search auto-registered iff TAVILY/BRAVE key set;
                    science-skills discovered via SKILL.md frontmatter
@@ -169,7 +169,7 @@ Two families of backend serve the same agents, selected with `[llm] provider`:
 | Family | `provider` values | Billing | Needs |
 | --- | --- | --- | --- |
 | **Metered API** | `openrouter` *(default)*, `anthropic`, `openai`, `gemini`/`google`, `groq`, `together`, `mistral`, `ollama`, `openai_compatible` | per token | an API key |
-| **Subscription CLI** | `claude_cli`, `codex_cli` | included in a subscription you already pay for | the CLI installed and signed in |
+| **Subscription CLI** | `claude_cli`, `codex_cli`, `agy_cli` | included in a subscription you already pay for | the CLI installed and signed in |
 
 They are fully interchangeable from the agents' point of view — the same six
 agents, the same tools, the same structured-output contract. What differs is who
@@ -293,6 +293,7 @@ subscription you already pay for. No API key is involved:
 | --- | --- | --- | --- |
 | `claude_cli` | `claude -p` (Claude Code) | OAuth login — run `claude` once | full ids (`claude-opus-4-7`) or aliases (`opus`, `sonnet`, `haiku`) |
 | `codex_cli` | `codex exec` (Codex) | `codex login` (ChatGPT account) | Codex model ids your account is entitled to |
+| `agy_cli` | `agy` (Antigravity CLI) | OAuth login — run `agy` once | model slugs from `agy models` (e.g. `gemini-4-carbon-high`, `gemini-4-neon-xhigh`; preset in `config/agy.toml`) |
 
 ```toml
 [llm]

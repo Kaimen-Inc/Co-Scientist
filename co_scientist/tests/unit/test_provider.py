@@ -48,6 +48,9 @@ def test_known_providers_includes_presets() -> None:
     assert "together" in KNOWN_PROVIDERS
     assert "mistral" in KNOWN_PROVIDERS
     assert "ollama" in KNOWN_PROVIDERS
+    assert "claude_cli" in KNOWN_PROVIDERS
+    assert "codex_cli" in KNOWN_PROVIDERS
+    assert "agy_cli" in KNOWN_PROVIDERS
 
 
 def test_get_provider_returns_openrouter_by_default() -> None:

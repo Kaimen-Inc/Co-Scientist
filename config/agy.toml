@@ -1,0 +1,36 @@
+# AI Co-Scientist — Antigravity CLI (`agy_cli`) subscription preset.
+#
+# Copy to ./co-scientist.toml (gitignored) or pass via:
+#   co-scientist -c config/agy.toml doctor
+#   co-scientist -c config/agy.toml run "your research goal"
+#
+# Uses your existing local `agy` login (no LLM API key required). Run `agy`
+# once interactively to authenticate, and `agy models` to verify the slugs
+# enabled for your account.
+
+[llm]
+provider = "agy_cli"
+
+[llm.agy_cli]
+binary = "agy"
+permission_mode = "scoped"           # scoped | skip_permissions
+sandbox = false
+use_json_schema = true
+timeout_seconds = 900
+max_parallel = 3
+
+# Two-tier Gemini 4 routing via Antigravity CLI:
+#   - High-frequency / triage roles: gemini-4-neon-xhigh
+#   - Deep reasoning / synthesis roles: gemini-4-carbon-high
+[models]
+parse_goal          = "gemini-4-neon-xhigh"
+generation          = "gemini-4-carbon-high"
+reflection          = "gemini-4-carbon-high"
+evolution           = "gemini-4-carbon-high"
+ranking_pairwise    = "gemini-4-neon-xhigh"
+ranking_debate      = "gemini-4-carbon-high"
+ranking_priority    = "gemini-4-carbon-high"
+metareview_feedback = "gemini-4-neon-xhigh"
+metareview_final    = "gemini-4-carbon-high"
+classifier          = "gemini-4-neon-xhigh"
+judge               = "gemini-4-neon-xhigh"

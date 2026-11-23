@@ -13,10 +13,10 @@ this module drives. Call the API, dispatch the `tool_use` blocks against the
 registry, feed `tool_result` back, repeat until the model stops or the cap
 trips.
 
-**Captured mode** (`claude_cli`, `codex_cli`) — the CLI *is* an agent harness
-and runs the cycle internally, so there is nothing here to drive. Tools run
-inside the MCP server, which records them; the backend hands that log back as
-`LLMResponse.capture` and this module reads it. The analogue of "force the
+**Captured mode** (`claude_cli`, `codex_cli`, `agy_cli`) — the CLI *is* an agent
+harness and runs the cycle internally, so there is nothing here to drive. Tools
+run inside the MCP server, which records them; the backend hands that log back
+as `LLMResponse.capture` and this module reads it. The analogue of "force the
 recording tool on the last iteration" is a single escalated retry, because
 headless CLIs have no `tool_choice` flag.
 

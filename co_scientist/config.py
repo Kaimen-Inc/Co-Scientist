@@ -271,6 +271,22 @@ class CodexCliCfg(BaseModel):
     max_parallel: int = 3
 
 
+class AgyCliCfg(BaseModel):
+    """Settings for the `agy` backend (Antigravity CLI, subscription auth)."""
+
+    binary: str = "agy"
+    permission_mode: Literal["scoped", "skip_permissions"] = "scoped"
+    """`"scoped"` uses session-only `--settings` to allow `mcp(cosci/*)` while
+    denying built-in shell/file-write/web tools; `"skip_permissions"` passes
+    `--dangerously-skip-permissions`."""
+    sandbox: bool = False
+    use_json_schema: bool = True
+    """Enforce single `record_*` structured outputs with `--json-schema` while
+    retaining the MCP capture path for research tools and fallback."""
+    timeout_seconds: int = 900
+    max_parallel: int = 3
+
+
 ThinkingLevel = Literal["default", "minimal", "low", "medium", "high"]
 
 
@@ -300,6 +316,9 @@ class LLMCfg(BaseModel):
     - "codex_cli" — `codex exec` (Codex). `[models]` values are Codex model
       ids; a ChatGPT account must be entitled to the model you pick.
       Tune under [llm.codex_cli].
+    - "agy_cli" — `agy` (Antigravity CLI). `[models]` values are model slugs
+      reported by `agy models` (e.g. "gemini-4-carbon-high",
+      "gemini-4-neon-xhigh"). Tune under [llm.agy_cli].
 
     **Metered API** — a vendor SDK with a per-token bill.
 
@@ -335,6 +354,7 @@ class LLMCfg(BaseModel):
     gemini: GeminiProviderCfg = Field(default_factory=GeminiProviderCfg)
     claude_cli: ClaudeCliCfg = Field(default_factory=ClaudeCliCfg)
     codex_cli: CodexCliCfg = Field(default_factory=CodexCliCfg)
+    agy_cli: AgyCliCfg = Field(default_factory=AgyCliCfg)
 
 
 class WebUICfg(BaseModel):
@@ -453,6 +473,8 @@ def backend_binary(cfg: Config) -> str:
         return cfg.llm.codex_cli.binary
     if name == "claude_cli":
         return cfg.llm.claude_cli.binary
+    if name == "agy_cli":
+        return cfg.llm.agy_cli.binary
     return ""
 
 
@@ -472,6 +494,7 @@ _PROVIDER_ENV_VARS: dict[str, str] = {
     "ollama":             "",   # keyless — local endpoint
     "claude_cli":         "",   # keyless — Claude Code subscription login
     "codex_cli":          "",   # keyless — ChatGPT subscription login
+    "agy_cli":            "",   # keyless — Antigravity CLI subscription login
 }
 
 

@@ -46,7 +46,14 @@ PRICE_TABLE: dict[str, dict[str, float]] = {
     "o3-mini":                    {"input":  1.1,  "output":  4.4,  "cache_write":  1.1,  "cache_read": 0.55},
     "o1":                         {"input": 15.0,  "output": 60.0,  "cache_write": 15.0,  "cache_read": 7.5},
     "o1-mini":                    {"input":  3.0,  "output": 12.0,  "cache_write":  3.0,  "cache_read": 1.5},
-    # Google (native short names AND OpenAI-compat short names)
+    # Google (native short names, Antigravity CLI slugs, AND OpenAI-compat short names)
+    "gemini-4-carbon-high":       {"input":  5.0,  "output": 25.0,  "cache_write":  5.0,  "cache_read": 0.5},
+    "gemini-4-carbon-medium":     {"input":  4.0,  "output": 20.0,  "cache_write":  4.0,  "cache_read": 0.4},
+    "gemini-4-carbon-low":        {"input":  3.0,  "output": 15.0,  "cache_write":  3.0,  "cache_read": 0.3},
+    "gemini-4-neon-xhigh":        {"input":  3.0,  "output": 15.0,  "cache_write":  3.0,  "cache_read": 0.3},
+    "gemini-4-neon-high":         {"input":  2.5,  "output": 12.5,  "cache_write":  2.5,  "cache_read": 0.25},
+    "gemini-4-neon-medium":       {"input":  2.0,  "output": 10.0,  "cache_write":  2.0,  "cache_read": 0.2},
+    "gemini-4-neon-low":          {"input":  1.5,  "output":  7.5,  "cache_write":  1.5,  "cache_read": 0.15},
     "gemini-3-pro":               {"input":  2.0,  "output": 12.0,  "cache_write":  2.0,  "cache_read": 0.5},
     "gemini-3-pro-preview":       {"input":  2.0,  "output": 12.0,  "cache_write":  2.0,  "cache_read": 0.5},
     "gemini-3-flash":             {"input":  0.3,  "output":  2.5,  "cache_write":  0.3,  "cache_read": 0.075},
@@ -152,6 +159,7 @@ DEGRADE_CHAINS: tuple[list[str], ...] = (
         "anthropic/claude-sonnet-4-6",
         "anthropic/claude-haiku-4.5",
     ],
+    ["gemini-4-carbon-high", "gemini-4-neon-xhigh"],
 )
 
 # The canonical chain, for callers that just want the default family.
