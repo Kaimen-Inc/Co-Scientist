@@ -62,6 +62,12 @@ def test_ollama_is_keyless() -> None:
     assert has_llm_key(cfg)
 
 
+def test_agy_cli_is_keyless() -> None:
+    cfg = _cfg("agy_cli")
+    assert provider_key_env(cfg) == ""
+    assert has_llm_key(cfg)
+
+
 def test_provider_key_env_returns_expected_var_name() -> None:
     cfg = _cfg("openrouter")
     assert provider_key_env(cfg) == "OPENROUTER_API_KEY"

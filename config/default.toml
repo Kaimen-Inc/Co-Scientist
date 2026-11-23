@@ -93,6 +93,7 @@ reserve    = 0.08
 #   gemini       "gemini-3-pro" / "gemini-3-flash"
 #   claude_cli   either the anthropic ids above, or "opus" / "sonnet" / "haiku"
 #   codex_cli    Codex model ids your ChatGPT account is entitled to
+#   agy_cli      Antigravity CLI slugs from `agy models` (e.g. "gemini-4-carbon-high" / "gemini-4-neon-xhigh")
 [models]
 parse_goal          = "anthropic/claude-sonnet-4-6"
 generation          = "anthropic/claude-opus-4-7"
@@ -195,6 +196,8 @@ classifier_warn_categories = ["dual_use_bio"]
 #                  ("claude-sonnet-4-6") both work.
 #   "codex_cli"  — `codex exec` (Codex). [models] are Codex model ids; your
 #                  ChatGPT account must be entitled to the one you pick.
+#   "agy_cli"    — `agy` (Antigravity CLI). [models] are model slugs reported
+#                  by `agy models` (see config/agy.toml for a ready-made preset).
 #
 # Metered API: a vendor SDK with a per-token bill.
 #   "openrouter" — the default. 200+ models from every vendor behind one key,
@@ -236,6 +239,14 @@ replace_system_prompt = true
 [llm.codex_cli]
 binary = "codex"
 sandbox = "read-only"
+timeout_seconds = 900
+max_parallel = 3
+
+[llm.agy_cli]
+binary = "agy"
+permission_mode = "scoped"           # scoped | skip_permissions
+sandbox = false
+use_json_schema = true
 timeout_seconds = 900
 max_parallel = 3
 
